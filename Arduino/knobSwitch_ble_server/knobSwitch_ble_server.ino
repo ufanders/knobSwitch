@@ -7,7 +7,7 @@
 // See the following for generating UUIDs:
 // https://www.uuidgenerator.net/
 
-#define SERVICE_UUID "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
+#define SERVICE_UUID "18550d7d-d1aa-4968-a563-e8ebeb4840ea"
 
 struct sr8500_property_map {
   char uuid[37];
@@ -81,8 +81,6 @@ void setup() {
     sr8500_chars_ptr[i] = pService->createCharacteristic(sr8500Map[i].uuid,
     BLECharacteristic::PROPERTY_READ);
   }
-
-  //TODO: read/refresh all statuses.
   
   pService->start();
   BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
@@ -92,6 +90,10 @@ void setup() {
   pAdvertising->setMinPreferred(0x12);
   BLEDevice::startAdvertising();
   Serial.println("Characteristics defined! Now you can read it in your phone!");
+
+  //TODO: read/refresh all statuses.
+  Serial1.print("@AST:F\r"); //enable auto status update for all layers.
+  Serial1.print("@PWR:?\r");
 }
 
 char rxBuf[32], rxBufIdx, rxBufLen;
@@ -101,14 +103,14 @@ void loop() {
   char rc;
 
   //TODO: receive any new status update.
-  if(Serial2.available())
+  if(Serial1.available())
   {
     rxBufIdx = 0; rxBufLen = 0;
     
     //read in characters until we see a CR.
-    while(Serial2.available())
+    while(Serial1.available())
     {
-      rc = Serial2.read();
+      rc = Serial1.read();
       if(rc != '\r') rxBuf[rxBufIdx++] = rc; 
       else rxBuf[rxBufIdx] = '\0'; rxBufLen = rxBufIdx;
     }
@@ -123,6 +125,9 @@ void loop() {
 
 int processUpdateSerial(char* strUpdate)
 {
+  Serial.println(strUpdate); //print incoming string to console.
+  rxBufLen = 0; //reset receiver.
+  
   //TODO: parse update string and update corresponding characteristic value.
   char statusStr[4]; //includes null terminator.
   scanf("%3s", statusStr); //read first 3 characters.
@@ -141,5 +146,7 @@ int processUpdateSerial(char* strUpdate)
   }
 
   if(i == SR8500_NUMCHARS) return 1; //error - couldn't find a match.
-  else return 0;
+  else rxBufLen = 0; //reset receiver.
+  
+  return 0;
 }
