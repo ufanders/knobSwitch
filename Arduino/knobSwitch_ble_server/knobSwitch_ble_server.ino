@@ -64,9 +64,9 @@ void setup() {
 
   Serial1.begin(9600, SERIAL_8N1, 5, 4); //pin 4=TXD, pin 5=RXD.
 
-  BLEDevice::init("Long name works now");
+  BLEDevice::init("Marantz SR8500");
   BLEServer *pServer = BLEDevice::createServer();
-  BLEService *pService = pServer->createService(SERVICE_UUID);
+  BLEService *pService = pServer->createService(BLEUUID(SERVICE_UUID), SR8500_NUMCHARS, 0);
 
   BLECharacteristic *pCharacteristic;
   
