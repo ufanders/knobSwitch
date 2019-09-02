@@ -14,16 +14,14 @@
 // https://www.uuidgenerator.net/
 
 #define SERVICE_UUID        "4fafc201-1fb5-459e-8fcc-c5c9c331914b"
-#define CHARACTERISTIC_UUID "beb5483e-36e1-4688-b7f5-ea07361b26a8"
 
-//TODO: refactor into struct to map (statusType, UUID).
-
-struct sr8500_characteristic {
+struct sr8500_property_map {
   char uuid[37];
   char statusStr[4];
 };
 
-sr8500_characteristic sr8500CharMap[] = {
+//we want to keep this info in flash, not in RAM.
+const sr8500_property_map sr8500Map[] = {
   {"7b0819db-21f6-429d-ad5a-c31215fc7114", "PWR"},
   {"1ffacfe7-6051-42b1-8dab-004e164a82cd", "VOL"},
   {"d1cf0f01-a78d-4de0-9812-bd391bcba635", "AMT"},
@@ -62,7 +60,7 @@ sr8500_characteristic sr8500CharMap[] = {
   {"5731a6c9-64c6-41ee-9fd3-0cc3d0bd7692", "MTM"}
 };
 
-#define SR8500_NUMCHARS (sizeof(sr8500CharMap)/sizeof(sr8500_characteristic))
+#define SR8500_NUMCHARS (sizeof(sr8500Map)/sizeof(sr8500_property_map))
 
 /*
 enum SR8500_chars_idx {
@@ -129,7 +127,7 @@ void setup() {
   Serial.begin(115200);
   Serial.println("Starting BLE work!");
 
-  Serial1.begin(9600, SERIAL_8N1, 5, 4); //4=TXD, 5=RXD.
+  Serial1.begin(9600, SERIAL_8N1, 5, 4); //pin 4=TXD, pin 5=RXD.
 
   BLEDevice::init("Long name works now");
   BLEServer *pServer = BLEDevice::createServer();
@@ -140,14 +138,14 @@ void setup() {
   for(int i = 0; i<SR8500_NUMCHARS-4; i++)
   {
     //pCharacteristic = pService->createCharacteristic(SR8500_chars_uuid[i],
-    sr8500_chars_ptr[i] = pService->createCharacteristic(sr8500CharMap[i].uuid,
+    sr8500_chars_ptr[i] = pService->createCharacteristic(sr8500Map[i].uuid,
     BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
   }
 
   for(int i = SR8500_NUMCHARS-4; i<SR8500_NUMCHARS; i++)
   {
     //pCharacteristic = pService->createCharacteristic(SR8500_chars_uuid[i],
-    sr8500_chars_ptr[i] = pService->createCharacteristic(sr8500CharMap[i].uuid,
+    sr8500_chars_ptr[i] = pService->createCharacteristic(sr8500Map[i].uuid,
     BLECharacteristic::PROPERTY_READ);
   }
 
@@ -176,7 +174,7 @@ void loop() {
   {
     rxBufIdx = 0; rxBufLen = 0;
     
-    //read in characters until we see a LF.
+    //read in characters until we see a CR.
     while(Serial2.available())
     {
       rc = Serial2.read();
@@ -185,27 +183,32 @@ void loop() {
     }
   }
 
+  //process any new status update.
   if(rxBufLen && rxBufIdx) processUpdateSerial(rxBuf);
+
+  //TODO: push any new status update. Is this handled by the BLE subsystem already via notifications?
   
 }
 
 int processUpdateSerial(char* strUpdate)
 {
   //TODO: parse update string and update corresponding characteristic value.
-  char statusType[4]; //includes null terminator.
-  scanf("%3s", statusType); //read first 3 characters.
+  char statusStr[4]; //includes null terminator.
+  scanf("%3s", statusStr); //read first 3 characters.
 
   //search for the characteristic the received status update corresponds to.
   int i = 0;
   while(i<SR8500_NUMCHARS)
   {
-    if(!memcmp(statusType, sr8500CharMap[i].statusStr, 3))
+    if(!memcmp(statusStr, sr8500Map[i].statusStr, 3))
     {
       //TODO: update characteristic value with received status value.
-      
+      sr8500_chars_ptr[i]->setValue(statusStr);
       break;
     }
+    else i++;
   }
-  
-  return 0;
+
+  if(i == SR8500_NUMCHARS) return 1; //error - couldn't find a match.
+  else return 0;
 }
