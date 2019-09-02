@@ -1,0 +1,25 @@
+00:05:24 **** Incremental Build of configuration Default for project knobSwitch ****
+make -j7 all 
+Toolchain path: /Users/ufanders/esp/xtensa-esp32-elf/bin/xtensa-esp32-elf-gcc
+WARNING: Toolchain version is not supported: crosstool-ng-1.22.0-75-gbaf03c2
+Expected to see version: esp32-2019r1
+Please check ESP-IDF setup instructions and update the toolchain, or proceed at your own risk.
+WARNING: Compiler version is not supported: 5.2.0
+Expected to see version(s): 8.2.0
+Please check ESP-IDF setup instructions and update the toolchain, or proceed at your own risk.
+Python requirements from /Users/ufanders/esp/esp-idf/requirements.txt are satisfied.
+
+App "app-template" version: 1cd5752-dirty
+CC /Users/ufanders/Documents/GitHub/knobSwitch/workspace/knobSwitch/build/main/marantz_sr8500.o
+AR /Users/ufanders/Documents/GitHub/knobSwitch/workspace/knobSwitch/build/main/libmain.a
+Generating esp32.project.ld
+WARNING: Toolchain version is not supported: crosstool-ng-1.22.0-75-gbaf03c2
+Expected to see version: esp32-2019r1
+Please check ESP-IDF setup instructions and update the toolchain, or proceed at your own risk.
+WARNING: Compiler version is not supported: 5.2.0
+Expected to see version(s): 8.2.0
+Please check ESP-IDF setup instructions and update the toolchain, or proceed at your own risk.
+LD /Users/ufanders/Documents/GitHub/knobSwitch/workspace/knobSwitch/build/app-template.elf
+esptool.py v2.7-dev
+To flash all build output, run 'make flash' or:
+python /Users/ufanders/esp/esp-idf/components/esptool_py/esptool/esptool.py --chip esp32 --port /dev/tty.SLAB_USBtoUART --baud 921600 --before default_reset --after hard_reset write_flash -z --flash_mode dio --flash_freq 40m --flash_size detect 0x1000 /Users/ufanders/Documents/GitHub/knobSwitch/workspace/knobSwitch/build/bootloader/bootloader.bin 0x10000 /Users/ufanders/Documents/GitHub/knobSwitch/workspace/knobSwitch/build/app-template.bin 0x8000 /Users/ufanders/Documents/GitHub/knobSwitch/workspace/knobSwitch/build/partitions_singleapp.bin
