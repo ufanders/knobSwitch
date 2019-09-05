@@ -51,7 +51,8 @@ const sr8500_property_map sr8500Map[] = {
   {"c67b1a61-1ac9-43b0-a5c1-8228ab12effd", "MSC"}, 
   {"34eba641-6f2e-446a-8755-ea1d0fd30d62", "MTF"}, 
   {"7bb61d7e-5cac-4b90-8982-1972975b12b9", "MTP"}, 
-  {"5731a6c9-64c6-41ee-9fd3-0cc3d0bd7692", "MTM"}
+  {"5731a6c9-64c6-41ee-9fd3-0cc3d0bd7692", "MTM"},
+  {"85cd9a55-5766-4a26-aac4-be7054b0c4b0", "OSD"}
 };
 
 #define SR8500_NUMCHARS (sizeof(sr8500Map)/sizeof(sr8500_property_map))
@@ -158,8 +159,7 @@ int processUpdateSerial(char* strUpdate)
         memcpy(statusStr, &ptr[4], len-4); //isolate last character(s).
         statusStr[len-4] = '\0';
         Serial.printf("Match, len: %d value: %s\n", len, statusStr);
-        //Serial.println(statusStr);
-        //TODO: update characteristic value with received status value.
+        //update characteristic value with received status value.
         sr8500_chars_ptr[i]->setValue(statusStr);
       }
       else i++;
