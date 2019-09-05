@@ -128,17 +128,18 @@ int processUpdateSerial(char* strUpdate)
   Serial.println(strUpdate); //print incoming string to console.
   rxBufLen = 0; //reset receiver.
   
-  //TODO: isolate multiple updates within one response using '@' token.
+  //isolate multiple updates within one response using '@' token.
   int init_size = strlen(strUpdate);
   char delim[] = "@";
+  char len = 0;
 
   char *ptr = strtok(strUpdate, delim);
   int match;
 
   while(ptr != NULL)
   {
-    //TODO: parse update string and update corresponding characteristic value.
-    char statusStr[4]; //includes null terminator.
+    //parse update string and update corresponding characteristic value.
+    char statusStr[16]; //includes null terminator.
   
     //search for the characteristic the received status update corresponds to.
     int i = 0;
@@ -153,9 +154,11 @@ int processUpdateSerial(char* strUpdate)
       if(c == 0) //we found a match.
       {
         match = 1;
-        Serial.println("Match.");
-        memcpy(statusStr, &ptr[4], 4); //isolate last 4 characters.
-        statusStr[3] = '\0';
+        len = strlen(ptr);
+        memcpy(statusStr, &ptr[4], len-4); //isolate last character(s).
+        statusStr[len-4] = '\0';
+        Serial.printf("Match, len: %d value: %s\n", len, statusStr);
+        //Serial.println(statusStr);
         //TODO: update characteristic value with received status value.
         sr8500_chars_ptr[i]->setValue(statusStr);
       }
@@ -167,12 +170,8 @@ int processUpdateSerial(char* strUpdate)
       Serial.println("\nNo match.");
     }
 
-    ptr = strtok(NULL, delim);
+    ptr = strtok(NULL, delim); //parse next token.
   }
-  
-  rxBufLen = 0; //reset receiver.
 
-  
-  
   return 0;
 }
