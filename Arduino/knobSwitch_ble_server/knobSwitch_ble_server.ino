@@ -128,25 +128,51 @@ int processUpdateSerial(char* strUpdate)
   Serial.println(strUpdate); //print incoming string to console.
   rxBufLen = 0; //reset receiver.
   
-  //TODO: parse update string and update corresponding characteristic value.
-  char statusStr[4]; //includes null terminator.
-  scanf("%3s", statusStr); //read first 3 characters.
+  //TODO: isolate multiple updates within one response using '@' token.
+  int init_size = strlen(strUpdate);
+  char delim[] = "@";
 
-  //search for the characteristic the received status update corresponds to.
-  int i = 0;
-  while(i<SR8500_NUMCHARS)
+  char *ptr = strtok(strUpdate, delim);
+  int match;
+
+  while(ptr != NULL)
   {
-    if(!memcmp(statusStr, sr8500Map[i].statusStr, 3))
+    //TODO: parse update string and update corresponding characteristic value.
+    char statusStr[4]; //includes null terminator.
+  
+    //search for the characteristic the received status update corresponds to.
+    int i = 0;
+    int c = 0;
+    match = 0;
+    while(i<SR8500_NUMCHARS && !match)
     {
-      //TODO: update characteristic value with received status value.
-      sr8500_chars_ptr[i]->setValue(statusStr);
-      break;
+      c = memcmp(ptr, sr8500Map[i].statusStr, 3);
+  
+      Serial.printf("%.3s == %.3s? :%d | ", ptr, sr8500Map[i].statusStr, c);
+      
+      if(c == 0) //we found a match.
+      {
+        match = 1;
+        Serial.println("Match.");
+        memcpy(statusStr, &ptr[4], 4); //isolate last 4 characters.
+        statusStr[3] = '\0';
+        //TODO: update characteristic value with received status value.
+        sr8500_chars_ptr[i]->setValue(statusStr);
+      }
+      else i++;
     }
-    else i++;
-  }
 
-  if(i == SR8500_NUMCHARS) return 1; //error - couldn't find a match.
-  else rxBufLen = 0; //reset receiver.
+    if(!match)
+    {
+      Serial.println("\nNo match.");
+    }
+
+    ptr = strtok(NULL, delim);
+  }
+  
+  rxBufLen = 0; //reset receiver.
+
+  
   
   return 0;
 }
