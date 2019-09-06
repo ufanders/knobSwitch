@@ -52,12 +52,14 @@ const sr8500_property_map sr8500Map[] = {
   {"34eba641-6f2e-446a-8755-ea1d0fd30d62", "MTF"}, 
   {"7bb61d7e-5cac-4b90-8982-1972975b12b9", "MTP"}, 
   {"5731a6c9-64c6-41ee-9fd3-0cc3d0bd7692", "MTM"},
-  {"85cd9a55-5766-4a26-aac4-be7054b0c4b0", "OSD"}
+  {"85cd9a55-5766-4a26-aac4-be7054b0c4b0", "OSD"},
+  {"44e017cb-f131-4c56-a75e-3f1b499319ac", "AST"}
 };
 
 #define SR8500_NUMCHARS (sizeof(sr8500Map)/sizeof(sr8500_property_map))
 
 BLECharacteristic* sr8500_chars_ptr[SR8500_NUMCHARS];
+char rxBuf[32], rxBufIdx, rxBufLen;
 
 void setup() {
   Serial.begin(115200);
@@ -70,8 +72,8 @@ void setup() {
   BLEService *pService = pServer->createService(BLEUUID(SERVICE_UUID), SR8500_NUMCHARS, 0);
 
   BLECharacteristic *pCharacteristic;
-  
-  for(int i = 0; i<SR8500_NUMCHARS-4; i++)
+  int i;
+  for(i = 0; i<SR8500_NUMCHARS-4; i++)
   {
     sr8500_chars_ptr[i] = pService->createCharacteristic(sr8500Map[i].uuid,
     BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
@@ -91,34 +93,23 @@ void setup() {
   pAdvertising->setMinPreferred(0x12);
   BLEDevice::startAdvertising();
   Serial.println("Characteristics defined! Now you can read it in your phone!");
-
-  //TODO: read/refresh all statuses.
+  
   Serial1.print("@AST:F\r"); //enable auto status update for all layers.
-  Serial1.print("@PWR:?\r");
+  
+  //read/refresh all statuses.
+  for(i=0; i<SR8500_NUMCHARS-1; i++) //skip AST as we've already received its status.
+  {
+    Serial1.printf("@%.3s:?\r", sr8500Map[i].statusStr);
+    while(!receiveUpdateSerial());
+    processUpdateSerial(rxBuf);
+  }
+  
 }
-
-char rxBuf[32], rxBufIdx, rxBufLen;
 
 void loop() {
 
-  char rc;
-
-  //TODO: receive any new status update.
-  if(Serial1.available())
-  {
-    rxBufIdx = 0; rxBufLen = 0;
-    
-    //read in characters until we see a CR.
-    while(Serial1.available())
-    {
-      rc = Serial1.read();
-      if(rc != '\r') rxBuf[rxBufIdx++] = rc; 
-      else rxBuf[rxBufIdx] = '\0'; rxBufLen = rxBufIdx;
-    }
-  }
-
   //process any new status update.
-  if(rxBufLen && rxBufIdx) processUpdateSerial(rxBuf);
+  if(receiveUpdateSerial()) processUpdateSerial(rxBuf);
 
   //TODO: push any new status update. Is this handled by the BLE subsystem already via notifications?
   
@@ -127,7 +118,7 @@ void loop() {
 int processUpdateSerial(char* strUpdate)
 {
   Serial.println(strUpdate); //print incoming string to console.
-  rxBufLen = 0; //reset receiver.
+  //rxBufLen = 0; //reset receiver.
   
   //isolate multiple updates within one response using '@' token.
   int init_size = strlen(strUpdate);
@@ -140,7 +131,7 @@ int processUpdateSerial(char* strUpdate)
   while(ptr != NULL)
   {
     //parse update string and update corresponding characteristic value.
-    char statusStr[16]; //includes null terminator.
+    char statusStr[16];
   
     //search for the characteristic the received status update corresponds to.
     int i = 0;
@@ -173,5 +164,30 @@ int processUpdateSerial(char* strUpdate)
     ptr = strtok(NULL, delim); //parse next token.
   }
 
+  return 0;
+}
+
+int receiveUpdateSerial(void)
+{
+  char rc;
+
+  //TODO: receive any new status update.
+  if(Serial1.available())
+  {
+    rxBufIdx = 0; rxBufLen = 0;
+    
+    //read in characters until we see a CR.
+    while(Serial1.available())
+    {
+      rc = Serial1.read();
+      if(rc != '\r') rxBuf[rxBufIdx++] = rc; 
+      else 
+      {
+        rxBuf[rxBufIdx] = '\0'; rxBufLen = rxBufIdx;
+        return rxBufLen;
+      }
+    }
+  }
+  
   return 0;
 }
