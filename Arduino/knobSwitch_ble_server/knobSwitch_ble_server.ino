@@ -58,8 +58,46 @@ const sr8500_property_map sr8500Map[] = {
 
 #define SR8500_NUMCHARS (sizeof(sr8500Map)/sizeof(sr8500_property_map))
 
+char sr8500_searchByUUID(const char*);
+char sr8500_searchByCmd(char*);
+
+
 BLECharacteristic* sr8500_chars_ptr[SR8500_NUMCHARS];
 char rxBuf[32], rxBufIdx, rxBufLen;
+
+bool deviceConnected = false;
+bool oldDeviceConnected = false;
+
+class MyServerCallbacks: public BLEServerCallbacks {
+    void onConnect(BLEServer* pServer) {
+      deviceConnected = true;
+    };
+
+    void onDisconnect(BLEServer* pServer) {
+      deviceConnected = false;
+    }
+};
+
+class MyCallbacks: public BLECharacteristicCallbacks {
+    void onWrite(BLECharacteristic *pCharacteristic) {
+
+      Serial.println("OnWrite");
+      
+      std::string val = pCharacteristic->getValue();
+      std::string strUUID = pCharacteristic->getUUID().toString();
+
+      //TODO: fetch command string using UUID
+      char i = 0;
+      i = sr8500_searchByUUID(strUUID.c_str());
+
+      //TODO: write to serial port.
+      Serial.printf("@%.3s:%s\r", sr8500Map[i].statusStr, val.c_str());
+      Serial1.printf("@%.3s:%s\r", sr8500Map[i].statusStr, val.c_str());
+    };
+};
+
+BLEServer *pServer;
+BLEService *pService;
 
 void setup() {
   Serial.begin(115200);
@@ -68,21 +106,23 @@ void setup() {
   Serial1.begin(9600, SERIAL_8N1, 5, 4); //pin 4=TXD, pin 5=RXD.
 
   BLEDevice::init("Marantz SR8500");
-  BLEServer *pServer = BLEDevice::createServer();
-  BLEService *pService = pServer->createService(BLEUUID(SERVICE_UUID), SR8500_NUMCHARS, 0);
-
+  pServer = BLEDevice::createServer();
+  pService = pServer->createService(BLEUUID(SERVICE_UUID), SR8500_NUMCHARS, 0);
   BLECharacteristic *pCharacteristic;
+  
   int i;
   for(i = 0; i<SR8500_NUMCHARS-4; i++)
   {
     sr8500_chars_ptr[i] = pService->createCharacteristic(sr8500Map[i].uuid,
     BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
+    sr8500_chars_ptr[i]->setCallbacks(new MyCallbacks());
   }
 
   for(int i = SR8500_NUMCHARS-4; i<SR8500_NUMCHARS; i++)
   {
     sr8500_chars_ptr[i] = pService->createCharacteristic(sr8500Map[i].uuid,
     BLECharacteristic::PROPERTY_READ);
+    sr8500_chars_ptr[i]->setCallbacks(new MyCallbacks());
   }
   
   pService->start();
@@ -108,11 +148,29 @@ void setup() {
 
 void loop() {
 
-  //process any new status update.
+  // disconnecting
+  if(!deviceConnected && oldDeviceConnected) {
+      delay(500); // give the bluetooth stack the chance to get things ready
+      pServer->startAdvertising(); // restart advertising
+      Serial.println("start advertising");
+      oldDeviceConnected = deviceConnected;
+  }
+  
+  // connecting
+  if(deviceConnected && !oldDeviceConnected) {
+      oldDeviceConnected = deviceConnected;
+  }
+
+  //connected
+  if(deviceConnected) {
+    
+  }
+
+  //process any updates coming from the serial port.
   if(receiveUpdateSerial()) processUpdateSerial(rxBuf);
 
   //TODO: push any new status update. Is this handled by the BLE subsystem already via notifications?
-  
+
 }
 
 int processUpdateSerial(char* strUpdate)
@@ -190,4 +248,51 @@ int receiveUpdateSerial(void)
   }
   
   return 0;
+}
+
+char sr8500_searchByCmd(char* ptrCmd)
+{
+  char retVal = 0xFF; //No match found.
+
+  //search for the characteristic the received status update corresponds to.
+  int i = 0;
+  int c = 0;
+  int match = 0;
+  while(i<SR8500_NUMCHARS && !match)
+  {
+    c = memcmp(ptrCmd, sr8500Map[i].statusStr, 3);
+
+    Serial.printf("%.3s == %.3s? :%d | ", ptrCmd, sr8500Map[i].statusStr, c);
+    
+    if(c == 0) //we found a match.
+    {
+      match = 1;
+    }
+    else i++;
+  }
+
+  return retVal;
+}
+
+char sr8500_searchByUUID(const char* ptrUUID)
+{
+  char retVal = 0xFF; //No match found.
+
+  //search for the command the written characteristic maps to.
+  int i = 0;
+  int c = 0;
+  int match = 0;
+  while(i<SR8500_NUMCHARS && !match)
+  {
+    c = strcmp(ptrUUID, sr8500Map[i].uuid);
+    
+    if(c == 0) //we found a match.
+    {
+      match = 1;
+      retVal = i;
+    }
+    else i++;
+  }
+
+  return retVal;
 }
