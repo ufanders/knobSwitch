@@ -14,6 +14,9 @@ struct sr8500_property_map {
   char statusStr[4];
 };
 
+//NOTE: The STANDBY MODE must be set to NORMAL 
+//instead of ECONOMY for the power function to work correctly.
+
 //we want to keep this info in flash, not in RAM.
 const sr8500_property_map sr8500Map[] = {
   {"7b0819db-21f6-429d-ad5a-c31215fc7114", "PWR"},
@@ -61,7 +64,6 @@ const sr8500_property_map sr8500Map[] = {
 char sr8500_searchByUUID(const char*);
 char sr8500_searchByCmd(char*);
 
-
 BLECharacteristic* sr8500_chars_ptr[SR8500_NUMCHARS];
 char rxBuf[32], rxBufIdx, rxBufLen;
 
@@ -80,19 +82,20 @@ class MyServerCallbacks: public BLEServerCallbacks {
 
 class MyCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *pCharacteristic) {
-
-      Serial.println("OnWrite");
       
       std::string val = pCharacteristic->getValue();
       std::string strUUID = pCharacteristic->getUUID().toString();
 
-      //TODO: fetch command string using UUID
+      //fetch command string using UUID
       char i = 0;
       i = sr8500_searchByUUID(strUUID.c_str());
 
-      //TODO: write to serial port.
-      Serial.printf("@%.3s:%s\r", sr8500Map[i].statusStr, val.c_str());
-      Serial1.printf("@%.3s:%s\r", sr8500Map[i].statusStr, val.c_str());
+      if(i != 0xFF)
+      {
+        //write to serial port.
+        Serial.printf("-> @%.3s:%s\n", sr8500Map[i].statusStr, val.c_str());
+        Serial1.printf("@%.3s:%s\r", sr8500Map[i].statusStr, val.c_str());
+      }
     };
 };
 
@@ -101,7 +104,7 @@ BLEService *pService;
 
 void setup() {
   Serial.begin(115200);
-  Serial.println("Starting BLE work!");
+  Serial.println("Starting BLE.");
 
   Serial1.begin(9600, SERIAL_8N1, 5, 4); //pin 4=TXD, pin 5=RXD.
 
@@ -132,13 +135,14 @@ void setup() {
   pAdvertising->setMinPreferred(0x06);  // functions that help with iPhone connections issue
   pAdvertising->setMinPreferred(0x12);
   BLEDevice::startAdvertising();
-  Serial.println("Characteristics defined! Now you can read it in your phone!");
+  Serial.println("Started BLE.");
   
   Serial1.print("@AST:F\r"); //enable auto status update for all layers.
   
   //read/refresh all statuses.
   for(i=0; i<SR8500_NUMCHARS-1; i++) //skip AST as we've already received its status.
   {
+    Serial.printf("-> @%.3s:?\n", sr8500Map[i].statusStr);
     Serial1.printf("@%.3s:?\r", sr8500Map[i].statusStr);
     while(!receiveUpdateSerial());
     processUpdateSerial(rxBuf);
@@ -168,15 +172,11 @@ void loop() {
 
   //process any updates coming from the serial port.
   if(receiveUpdateSerial()) processUpdateSerial(rxBuf);
-
-  //TODO: push any new status update. Is this handled by the BLE subsystem already via notifications?
-
 }
 
 int processUpdateSerial(char* strUpdate)
 {
-  Serial.println(strUpdate); //print incoming string to console.
-  //rxBufLen = 0; //reset receiver.
+  Serial.printf("<- %s\n", strUpdate); //print incoming string to console.
   
   //isolate multiple updates within one response using '@' token.
   int init_size = strlen(strUpdate);
@@ -185,39 +185,27 @@ int processUpdateSerial(char* strUpdate)
 
   char *ptr = strtok(strUpdate, delim);
   int match;
+  char i;
 
   while(ptr != NULL)
   {
     //parse update string and update corresponding characteristic value.
     char statusStr[16];
-  
-    //search for the characteristic the received status update corresponds to.
-    int i = 0;
-    int c = 0;
-    match = 0;
-    while(i<SR8500_NUMCHARS && !match)
-    {
-      c = memcmp(ptr, sr8500Map[i].statusStr, 3);
-  
-      Serial.printf("%.3s == %.3s? :%d | ", ptr, sr8500Map[i].statusStr, c);
-      
-      if(c == 0) //we found a match.
-      {
-        match = 1;
-        len = strlen(ptr);
-        memcpy(statusStr, &ptr[4], len-4); //isolate last character(s).
-        statusStr[len-4] = '\0';
-        Serial.printf("Match, len: %d value: %s\n", len, statusStr);
-        //update characteristic value with received status value.
-        sr8500_chars_ptr[i]->setValue(statusStr);
-      }
-      else i++;
-    }
 
-    if(!match)
+    i = sr8500_searchByCmd(ptr);
+
+    if(i != 0xff)
     {
-      Serial.println("\nNo match.");
+      match = 1;
+      len = strlen(ptr);
+      memcpy(statusStr, &ptr[4], len-4); //isolate last character(s).
+      statusStr[len-4] = '\0';
+      Serial.printf("Matched %.3s, len: %d value: %s\n", ptr, len, statusStr);
+      
+      //update characteristic value with received status value.
+      sr8500_chars_ptr[i]->setValue(statusStr);
     }
+    else Serial.println("\nNo match.");
 
     ptr = strtok(NULL, delim); //parse next token.
   }
@@ -229,7 +217,7 @@ int receiveUpdateSerial(void)
 {
   char rc;
 
-  //TODO: receive any new status update.
+  //receive any new status update.
   if(Serial1.available())
   {
     rxBufIdx = 0; rxBufLen = 0;
@@ -261,12 +249,11 @@ char sr8500_searchByCmd(char* ptrCmd)
   while(i<SR8500_NUMCHARS && !match)
   {
     c = memcmp(ptrCmd, sr8500Map[i].statusStr, 3);
-
-    Serial.printf("%.3s == %.3s? :%d | ", ptrCmd, sr8500Map[i].statusStr, c);
     
     if(c == 0) //we found a match.
     {
       match = 1;
+      retVal = i;
     }
     else i++;
   }
