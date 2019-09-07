@@ -35,6 +35,7 @@ const sr8500_property_map sr8500Map[] = {
   {"a89367a0-9e05-461d-9a07-10b8135f3a46", "TPR"}, 
   {"7e8f0681-a312-4934-9300-65de924e4ff0", "TMD"}, 
   {"ef8ce36d-1e04-4d4a-845d-d71707201257", "MNU"},
+  {"8981aff4-52c3-4e3b-9be6-dc11af1d4971", "CUR"},
   {"5e30b0bc-d3a3-45a6-a95b-ad5bfb6647a5", "TTO"}, 
   {"1bf5ef56-90d4-46d5-87b8-35c6d071a01b", "CHL"}, 
   {"eeea6f37-db29-44d0-bd4d-7c45641fa92f", "NGT"}, 
@@ -147,7 +148,6 @@ void setup() {
     while(!receiveUpdateSerial());
     processUpdateSerial(rxBuf);
   }
-  
 }
 
 void loop() {
