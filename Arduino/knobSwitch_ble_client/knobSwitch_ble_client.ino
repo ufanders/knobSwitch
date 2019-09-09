@@ -1,20 +1,9 @@
-/**
- * A BLE client example that is rich in capabilities.
- * There is a lot new capabilities implemented.
- * author unknown
- * updated by chegewara
- */
-
 #include "BLEDevice.h"
 #include "BLEScan.h"
-#include <AiEsp32RotaryEncoder.h>
+#include <SimpleRotary.h>
 
-#define ROTARY_ENCODER_A_PIN 35
-#define ROTARY_ENCODER_B_PIN 36
-#define ROTARY_ENCODER_BUTTON_PIN 26
-#define ROTARY_ENCODER_VCC_PIN -1 /*put -1 of Rotary encoder Vcc is connected directly to 3,3V; else you can use declared output pin for powering rotary encoder */
-
-AiEsp32RotaryEncoder rotaryEncoder = AiEsp32RotaryEncoder(ROTARY_ENCODER_A_PIN, ROTARY_ENCODER_B_PIN, ROTARY_ENCODER_BUTTON_PIN, ROTARY_ENCODER_VCC_PIN);
+// Pin A, Pin B, Button Pin
+SimpleRotary rotary(35,36,26);
 
 #define SERVICE_UUID "18550d7d-d1aa-4968-a563-e8ebeb4840ea"
 
@@ -82,6 +71,7 @@ static boolean connected = false;
 static boolean doScan = false;
 static BLERemoteCharacteristic* pRemoteCharacteristic;
 static BLEAdvertisedDevice* myDevice;
+static BLERemoteService* pRemoteService;
 
 static void notifyCallback(
   BLERemoteCharacteristic* pBLERemoteCharacteristic,
@@ -106,11 +96,9 @@ class MyClientCallback : public BLEClientCallbacks {
   }
 };
 
-int16_t encoderDelta = 0;
-
 bool connectToServer() {
     Serial.print("Forming a connection to ");
-    Serial.println(myDevice->getAddress().toString().c_str());
+    //Serial.println(myDevice->getAddress().toString().c_str());
     
     BLEClient*  pClient  = BLEDevice::createClient();
     Serial.println(" - Created client");
@@ -118,34 +106,17 @@ bool connectToServer() {
     pClient->setClientCallbacks(new MyClientCallback());
 
     // Connect to the remove BLE Server.
-    pClient->connect(myDevice);  // if you pass BLEAdvertisedDevice instead of address, it will be recognized type of peer device address (public or private)
+    pClient->connect(BLEAddress("b4:e6:2d:d9:fb:47")); //myDevice);  // if you pass BLEAdvertisedDevice instead of address, it will be recognized type of peer device address (public or private)
     Serial.println(" - Connected to server");
 
     // Obtain a reference to the service we are after in the remote BLE server.
-    BLERemoteService* pRemoteService = pClient->getService(serviceUUID);
-    if (pRemoteService == nullptr) {
-      Serial.print("Failed to find our service UUID: ");
-      Serial.println(serviceUUID.toString().c_str());
+    pRemoteService = pClient->getService(serviceUUID);
+    if (pRemoteService == NULL) {
+      Serial.println("Service not found.");
       pClient->disconnect();
       return false;
     }
-    Serial.println(" - Found our service");
-
-    /*
-    //Get remote characteristic.
-    pRemoteCharacteristic = pRemoteService->getCharacteristic(sr8500Map[i].uuid);
-    if (pRemoteCharacteristic == nullptr) {
-      Serial.printf("Can't find %s\n", sr8500Map[i].uuid);
-      pClient->disconnect();
-      return false;
-    }
-    Serial.printf("-> %s: ", sr8500Map[i].uuid);
-
-    //Write value to remote characteristic.
-    if(pRemoteCharacteristic->canWrite()) {
-      pRemoteCharacteristic->writeValue(c);
-      Serial.println(c);
-    }
+    Serial.println("Service found.");
 
     /*
     if(pRemoteCharacteristic->canNotify())
@@ -154,6 +125,7 @@ bool connectToServer() {
       
     connected = true;
 }
+
 /**
  * Scan for BLE servers and find the first one that advertises the service we are looking for.
  */
@@ -171,7 +143,7 @@ class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
       BLEDevice::getScan()->stop();
       myDevice = new BLEAdvertisedDevice(advertisedDevice);
       doConnect = true;
-      doScan = true;
+      doScan = false;
 
     } // Found our server
   } // onResult
@@ -223,61 +195,27 @@ char sr8500_searchByUUID(const char* ptrUUID)
   return retVal;
 }
 
-void rotary_loop() {
-
-  //lets see if anything changed
-  encoderDelta = rotaryEncoder.encoderChanged();
-  
-  //optionally we can ignore whenever there is no change
-  if(encoderDelta == 0)
-  {
-    return;
-  }
-  
-  //for some cases we only want to know if value is increased or decreased (typically for menu items)
-  if (encoderDelta>0)
-  {
-    Serial.print("+");
-  }
-  else
-  {
-    Serial.print("-");
-  }
-
-  //for other cases we want to know what is current value. Additionally often we only want if something changed
-  //example: when using rotary encoder to set termostat temperature, or sound volume etc
-
-
-  //if value is changed compared to our last read
-  if (encoderDelta!=0) {
-    //now we need current value
-    int16_t encoderValue = rotaryEncoder.readEncoder();
-    //process new value. Here is simple output.
-    Serial.print("Value: ");
-    Serial.println(encoderValue);
-  }
-}
-
 void setup() {
   Serial.begin(115200);
-
-  rotaryEncoder.begin();
-  rotaryEncoder.setup([]{rotaryEncoder.readEncoder_ISR();});
-  rotaryEncoder.enable();
   
   Serial.println("Starting BLE.");
   BLEDevice::init("");
 
+  /*
   // Retrieve a Scanner and set the callback we want to use to be informed when we
   // have detected a new device.  Specify that we want active scanning and start the
   // scan to run for 5 seconds.
+  
   BLEScan* pBLEScan = BLEDevice::getScan();
   pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
   pBLEScan->setInterval(1349);
   pBLEScan->setWindow(449);
   pBLEScan->setActiveScan(true);
   pBLEScan->start(5, false);
+  */
 
+  doConnect = true;
+  
   //esp_sleep_enable_ext0_wakeup(GPIO_NUM_33,1); //1 = High, 0 = Low
 
   //If you were to use ext1, you would use it like
@@ -292,28 +230,49 @@ void setup() {
 // This is the Arduino main loop function.
 void loop() {
 
-  rotary_loop();
-
-   //TODO: poke remote characteristics per the control being operated.
+  if(connected)
+  {    
+    //TODO: poke remote characteristics per the control being operated.
     char i;
     char c;
-    if(encoderDelta) //rotary encoder
+    char txBuf[16];
+    //BLERemoteCharacteristic RemoteCharacteristic;
+    BLERemoteCharacteristic* pRemoteCharacteristic; //= &RemoteCharacteristic;
+    
+    // 0 = not turning, 1 = CW, 2 = CCW
+    i = rotary.rotate();
+    if(i)
     {
-      i = 0;
-      
-      if (encoderDelta>0)
+      if (i == 1)
       {
-        Serial.println("+");
+        Serial.println("CW");
         c = '1';
       }
       else
       {
-        Serial.println("-");
+        Serial.println("CCW");
         c = '2';
+      }
+
+      //Get remote characteristic.
+      if(pRemoteService != nullptr)
+      {
+        pRemoteCharacteristic = pRemoteService->getCharacteristic(sr8500Map[i].uuid);
+        if (pRemoteCharacteristic == nullptr) {
+          Serial.println("Can't find characteristic.");
+        }
+        Serial.printf("-> %s: ", sr8500Map[1].uuid);
+    
+        //Write value to remote characteristic.
+        if(pRemoteCharacteristic->canWrite()) {
+          sprintf(txBuf, "@%s:%c\r", sr8500Map[1].statusStr, c);
+          Serial.println(txBuf);
+          pRemoteCharacteristic->writeValue(txBuf);
+        }
       }
     }
 
-    if(rotaryEncoder.currentButtonState() == BUT_RELEASED)
+    if(rotary.push())
     {
       //handle rotary encoder button.
       Serial.println("Click");
@@ -328,8 +287,8 @@ void loop() {
     {
       
     }
+  }
 
-/*
   // If the flag "doConnect" is true then we have scanned for and found the desired
   // BLE Server with which we wish to connect.  Now we connect to it.  Once we are 
   // connected we set the connected flag to be true.
@@ -345,7 +304,5 @@ void loop() {
   if(doScan){
     BLEDevice::getScan()->start(0);  // this is just eample to start scan after disconnect, most likely there is better way to do it in arduino
   }
-  */
-  
-  //delay(100);
+
 } // End of loop
