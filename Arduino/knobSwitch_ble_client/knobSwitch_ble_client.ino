@@ -1,6 +1,7 @@
 #include "BLEDevice.h"
 #include "BLEScan.h"
 #include <SimpleRotary.h>
+#include <M5Stack.h>
 
 // Pin A, Pin B, Button Pin
 SimpleRotary rotary(35,36,26);
@@ -84,45 +85,73 @@ static void notifyCallback(
     Serial.println(length);
     Serial.print(" val: ");
     Serial.println((char*)pData);
+    M5.Lcd.printf("Notify: %s, len: %d, val: %c\n", \
+    pBLERemoteCharacteristic->getUUID().toString().c_str(), length, pData);
+    M5.update();
 }
 
 class MyClientCallback : public BLEClientCallbacks {
   void onConnect(BLEClient* pclient) {
+    Serial.println("Connected.");
+    M5.Lcd.println("Connected.");
+    M5.update();
   }
 
   void onDisconnect(BLEClient* pclient) {
     connected = false;
-    Serial.println("onDisconnect");
+    Serial.println("Disconnected.");
+    M5.Lcd.println("Disconnected.");
+    M5.update();
   }
 };
 
-bool connectToServer() {
-    Serial.print("Forming a connection to ");
-    //Serial.println(myDevice->getAddress().toString().c_str());
-    
-    BLEClient*  pClient  = BLEDevice::createClient();
-    Serial.println(" - Created client");
+const char serverAddress[] = "b4:e6:2d:d9:fb:47";
 
+bool connectToServer() {
+
+    BLEClient*  pClient  = BLEDevice::createClient();
     pClient->setClientCallbacks(new MyClientCallback());
 
-    // Connect to the remove BLE Server.
-    pClient->connect(BLEAddress("b4:e6:2d:d9:fb:47")); //myDevice);  // if you pass BLEAdvertisedDevice instead of address, it will be recognized type of peer device address (public or private)
-    Serial.println(" - Connected to server");
+    // Connect to the remote BLE Server.
+    Serial.printf("Connecting to %s", serverAddress);
+    //Serial.println(myDevice->getAddress().toString().c_str());
+    pClient->connect(BLEAddress(serverAddress)); //myDevice);  // if you pass BLEAdvertisedDevice instead of address, it will be recognized type of peer device address (public or private)
 
     // Obtain a reference to the service we are after in the remote BLE server.
     pRemoteService = pClient->getService(serviceUUID);
     if (pRemoteService == NULL) {
       Serial.println("Service not found.");
+      M5.Lcd.println("Service not found.");
+      M5.update();
       pClient->disconnect();
       return false;
     }
     Serial.println("Service found.");
+    M5.Lcd.println("Service found.");
+    M5.update();
 
-    /*
-    if(pRemoteCharacteristic->canNotify())
-      pRemoteCharacteristic->registerForNotify(notifyCallback);
-      */
-      
+    //register all characteristics for realtime notification.
+    for(int i = 0; i < SR8500_NUMCHARS; i++)
+    {
+        pRemoteCharacteristic = pRemoteService->getCharacteristic(sr8500Map[i].uuid);
+        if (pRemoteCharacteristic != nullptr) 
+        {
+          if(pRemoteCharacteristic->canNotify())
+          {
+            Serial.printf("%s can notify.\n", sr8500Map[i].uuid);
+            M5.Lcd.printf("%s can notify.\n", sr8500Map[i].uuid);
+            M5.update();
+            pRemoteCharacteristic->registerForNotify(notifyCallback);
+          }
+          else
+          {
+            Serial.printf("%s can NOT notify.\n", sr8500Map[i].uuid);
+            M5.Lcd.printf("%s can NOT notify.\n", sr8500Map[i].uuid);
+            M5.update();
+          }
+        }
+    }
+ 
     connected = true;
 }
 
@@ -196,9 +225,29 @@ char sr8500_searchByUUID(const char* ptrUUID)
 }
 
 void setup() {
-  Serial.begin(115200);
+
+  //pins are pulled up by hardware and inputs at POR.
+  //pinMode(39, INPUT_PULLUP); //Button A
+  //pinMode(38, INPUT_PULLUP); //Button B
+  //pinMode(37, INPUT_PULLUP); //Button C
+
+  // initialize the M5Stack object
+  M5.begin();
+
+  // text print
+  M5.Lcd.fillScreen(BLACK);
+  M5.Lcd.setCursor(0, 0);
+  M5.Lcd.setTextColor(WHITE);
+  M5.Lcd.setTextSize(1);
+  Serial.println("Started LCD.");
+  M5.Lcd.println("Started LCD.");
+  M5.update();
   
+  Serial.begin(115200);
+
   Serial.println("Starting BLE.");
+  M5.Lcd.println("Starting BLE.");
+  M5.update();
   BLEDevice::init("");
 
   /*
@@ -238,26 +287,53 @@ void loop() {
     char txBuf[16];
     //BLERemoteCharacteristic RemoteCharacteristic;
     BLERemoteCharacteristic* pRemoteCharacteristic; //= &RemoteCharacteristic;
+
+    i = digitalRead(39);
+    if(!i) //button A
+    {
+      c = '0'; //toggle power.
+      
+      //Get remote characteristic.
+      if(pRemoteService != nullptr)
+      {
+        pRemoteCharacteristic = pRemoteService->getCharacteristic(sr8500Map[0].uuid);
+        if (pRemoteCharacteristic == nullptr) {
+          Serial.println("Can't find characteristic.");
+        }
+        Serial.printf("-> %s: ", sr8500Map[0].uuid);
     
-    // 0 = not turning, 1 = CW, 2 = CCW
-    i = rotary.rotate();
-    if(i)
+        //Write value to remote characteristic.
+        if(pRemoteCharacteristic->canWrite()) {
+          sprintf(txBuf, "@%s:%c\r", sr8500Map[0].statusStr, c);
+          Serial.println(txBuf);
+          pRemoteCharacteristic->writeValue(txBuf);
+        }
+
+        //read remote 
+      }
+
+      while(!digitalRead(39)); 
+    }
+    
+    
+    i = rotary.rotate(); // 0 = not turning, 1 = CW, 2 = CCW
+    if(i) //rotary encoder rotation
     {
       if (i == 1)
       {
-        Serial.println("CW");
-        c = '1';
+        //Serial.println("CW");
+        c = '1'; //volume up.
       }
       else
       {
-        Serial.println("CCW");
-        c = '2';
+        //Serial.println("CCW");
+        c = '2'; //volume down.
       }
 
       //Get remote characteristic.
       if(pRemoteService != nullptr)
       {
-        pRemoteCharacteristic = pRemoteService->getCharacteristic(sr8500Map[i].uuid);
+        pRemoteCharacteristic = pRemoteService->getCharacteristic(sr8500Map[1].uuid);
         if (pRemoteCharacteristic == nullptr) {
           Serial.println("Can't find characteristic.");
         }
@@ -272,21 +348,33 @@ void loop() {
       }
     }
 
-    if(rotary.push())
+    if(rotary.push()) //rotary encoder button.
     {
-      //handle rotary encoder button.
-      Serial.println("Click");
+      c = '0'; //toggle mute.
+      
+      //Get remote characteristic.
+      if(pRemoteService != nullptr)
+      {
+        pRemoteCharacteristic = pRemoteService->getCharacteristic(sr8500Map[2].uuid);
+        if (pRemoteCharacteristic == nullptr) {
+          Serial.println("Can't find characteristic.");
+        }
+        Serial.printf("-> %s: ", sr8500Map[2].uuid);
+    
+        //Write value to remote characteristic.
+        if(pRemoteCharacteristic->canWrite()) {
+          sprintf(txBuf, "@%s:%c\r", sr8500Map[2].statusStr, c);
+          Serial.println(txBuf);
+          pRemoteCharacteristic->writeValue(txBuf);
+        }
+      }
     }
 
     if(0) //selector switch
     {
       
     }
-
-    if(0) //pushbuttons
-    {
-      
-    }
+    
   }
 
   // If the flag "doConnect" is true then we have scanned for and found the desired
@@ -304,5 +392,7 @@ void loop() {
   if(doScan){
     BLEDevice::getScan()->start(0);  // this is just eample to start scan after disconnect, most likely there is better way to do it in arduino
   }
+
+  M5.update();
 
 } // End of loop
