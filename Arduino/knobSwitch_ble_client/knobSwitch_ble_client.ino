@@ -141,7 +141,7 @@ bool connectToServer() {
             Serial.printf("%s can notify.\n", sr8500Map[i].uuid);
             M5.Lcd.printf("%s can notify.\n", sr8500Map[i].uuid);
             M5.update();
-            pRemoteCharacteristic->registerForNotify(notifyCallback);
+            //pRemoteCharacteristic->registerForNotify(notifyCallback);
           }
           else
           {
@@ -285,8 +285,7 @@ void loop() {
     char i;
     char c;
     char txBuf[16];
-    //BLERemoteCharacteristic RemoteCharacteristic;
-    BLERemoteCharacteristic* pRemoteCharacteristic; //= &RemoteCharacteristic;
+    BLERemoteCharacteristic* pRemoteCharacteristic;
 
     i = digitalRead(39);
     if(!i) //button A
@@ -315,18 +314,15 @@ void loop() {
       while(!digitalRead(39)); 
     }
     
-    
     i = rotary.rotate(); // 0 = not turning, 1 = CW, 2 = CCW
     if(i) //rotary encoder rotation
     {
       if (i == 1)
       {
-        //Serial.println("CW");
         c = '1'; //volume up.
       }
       else
       {
-        //Serial.println("CCW");
         c = '2'; //volume down.
       }
 

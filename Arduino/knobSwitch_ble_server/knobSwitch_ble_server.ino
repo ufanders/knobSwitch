@@ -3,6 +3,7 @@
 #include <BLEServer.h>
 #include <string.h>
 #include <stdio.h>
+#include <BLE2902.h>
 
 // See the following for generating UUIDs:
 // https://www.uuidgenerator.net/
@@ -117,15 +118,19 @@ void setup() {
   int i;
   for(i = 0; i<SR8500_NUMCHARS-4; i++)
   {
-    sr8500_chars_ptr[i] = pService->createCharacteristic(sr8500Map[i].uuid,
-    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
+    sr8500_chars_ptr[i] = pService->createCharacteristic(sr8500Map[i].uuid, \
+    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE \
+    | BLECharacteristic::PROPERTY_NOTIFY | BLECharacteristic::PROPERTY_INDICATE);
+    sr8500_chars_ptr[i]->addDescriptor(new BLE2902());
     sr8500_chars_ptr[i]->setCallbacks(new MyCallbacks());
   }
 
   for(int i = SR8500_NUMCHARS-4; i<SR8500_NUMCHARS; i++)
   {
-    sr8500_chars_ptr[i] = pService->createCharacteristic(sr8500Map[i].uuid,
-    BLECharacteristic::PROPERTY_READ);
+    sr8500_chars_ptr[i] = pService->createCharacteristic(sr8500Map[i].uuid, \
+    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY \
+    | BLECharacteristic::PROPERTY_INDICATE);
+    sr8500_chars_ptr[i]->addDescriptor(new BLE2902());
     sr8500_chars_ptr[i]->setCallbacks(new MyCallbacks());
   }
   
@@ -204,6 +209,7 @@ int processUpdateSerial(char* strUpdate)
       
       //update characteristic value with received status value.
       sr8500_chars_ptr[i]->setValue(statusStr);
+      //sr8500_chars_ptr[i]->notify();
     }
     else Serial.println("\nNo match.");
 
