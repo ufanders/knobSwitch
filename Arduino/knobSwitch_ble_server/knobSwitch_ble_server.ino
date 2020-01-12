@@ -4,6 +4,10 @@
 #include <string.h>
 #include <stdio.h>
 
+int keypadPin = 36;
+char keyOld;
+unsigned long time_now = 0;
+
 // See the following for generating UUIDs:
 // https://www.uuidgenerator.net/
 
@@ -62,10 +66,30 @@ const sr8500_property_map sr8500Map[] = {
 
 #define SR8500_NUMCHARS (sizeof(sr8500Map)/sizeof(sr8500_property_map))
 
+BLECharacteristic* sr8500_chars_ptr[SR8500_NUMCHARS];
+
+struct sr5010_property_map {
+  char uuid[37];
+  char statusStr[9]; //up to 8-character prefix (wtf!)
+};
+
+const sr5010_property_map sr5010Map[] = {
+  {"bb0dae34-05cb-4290-a8c4-6dad813e82e2", "PW"},
+  {"88e1ef43-9804-411d-a1f9-f6cdbda9a9a9", "MV"},
+  {"60ef9a3d-5a67-464a-b7bf-fe1c187828f1", "MU"},
+  {"bfac98ba-7d94-41ff-8c06-be0a5a13ecaf", "MN"},
+  {"c21d2540-fe05-43d7-b929-54b76140e030", "SI"},
+  {"a6b89a0b-c740-4b82-bba5-df717b4163d5", "SV"},
+  {"0969d2b6-60d8-4a1b-a88c-8457449a453e", "TFHD"}
+};
+
+#define SR5010_NUMCHARS (sizeof(sr5010Map)/sizeof(sr5010_property_map))
+
+BLECharacteristic* sr5010_chars_ptr[SR5010_NUMCHARS];
+
 char sr8500_searchByUUID(const char*);
 char sr8500_searchByCmd(char*);
 
-BLECharacteristic* sr8500_chars_ptr[SR8500_NUMCHARS];
 char rxBuf[32], rxBufIdx, rxBufLen;
 
 bool deviceConnected = false;
@@ -94,8 +118,8 @@ class MyCallbacks: public BLECharacteristicCallbacks {
       if(i != 0xFF)
       {
         //write to serial port.
-        Serial.printf("-> @%.3s:%s\n", sr8500Map[i].statusStr, val.c_str());
-        Serial1.printf("@%.3s:%s\r", sr8500Map[i].statusStr, val.c_str());
+        Serial.printf("-> %.3s%s\n", sr5010Map[i].statusStr, val.c_str());
+        Serial1.printf("%.3s%s\r", sr5010Map[i].statusStr, val.c_str());
       }
     };
 };
@@ -109,25 +133,27 @@ void setup() {
 
   Serial1.begin(9600, SERIAL_8N1, 5, 4); //pin 4=TXD, pin 5=RXD.
 
-  BLEDevice::init("Marantz SR8500");
+  BLEDevice::init("Marantz SR5010");
   pServer = BLEDevice::createServer();
-  pService = pServer->createService(BLEUUID(SERVICE_UUID), SR8500_NUMCHARS, 0);
+  pService = pServer->createService(BLEUUID(SERVICE_UUID), SR5010_NUMCHARS, 0);
   BLECharacteristic *pCharacteristic;
   
   int i;
-  for(i = 0; i<SR8500_NUMCHARS-4; i++)
+  for(i = 0; i<SR5010_NUMCHARS; i++)
   {
-    sr8500_chars_ptr[i] = pService->createCharacteristic(sr8500Map[i].uuid,
+    sr5010_chars_ptr[i] = pService->createCharacteristic(sr5010Map[i].uuid,
     BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
-    sr8500_chars_ptr[i]->setCallbacks(new MyCallbacks());
+    sr5010_chars_ptr[i]->setCallbacks(new MyCallbacks());
   }
 
-  for(int i = SR8500_NUMCHARS-4; i<SR8500_NUMCHARS; i++)
+/*
+  for(int i = SR5010_NUMCHARS; i<SR5010_NUMCHARS; i++)
   {
-    sr8500_chars_ptr[i] = pService->createCharacteristic(sr8500Map[i].uuid,
+    sr5010_chars_ptr[i] = pService->createCharacteristic(sr5010Map[i].uuid,
     BLECharacteristic::PROPERTY_READ);
-    sr8500_chars_ptr[i]->setCallbacks(new MyCallbacks());
+    sr5010_chars_ptr[i]->setCallbacks(new MyCallbacks());
   }
+*/
   
   pService->start();
   BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
@@ -138,19 +164,34 @@ void setup() {
   BLEDevice::startAdvertising();
   Serial.println("Started BLE.");
   
-  Serial1.print("@AST:F\r"); //enable auto status update for all layers.
-  
   //read/refresh all statuses.
-  for(i=0; i<SR8500_NUMCHARS-1; i++) //skip AST as we've already received its status.
+  for(i=0; i<SR5010_NUMCHARS-1; i++)
   {
-    Serial.printf("-> @%.3s:?\n", sr8500Map[i].statusStr);
-    Serial1.printf("@%.3s:?\r", sr8500Map[i].statusStr);
+    Serial.printf("-> %s?\n", sr5010Map[i].statusStr);
+    Serial1.printf("%s?\r", sr5010Map[i].statusStr);
     while(!receiveUpdateSerial());
     processUpdateSerial(rxBuf);
   }
+
+  keyOld = 0;
+  //analogSetWidth(10);
+
+  time_now = millis();
 }
 
 void loop() {
+
+  if(millis() >= time_now + 100) //every 100ms
+  {
+    char keyNew = analogKeypadUpdate(keypadPin);
+    if(keyOld != keyNew)
+    {
+      Serial.printf("%u\n", keyNew);
+      keyOld = keyNew;
+    }
+
+    time_now = millis();
+  }
 
   // disconnecting
   if(!deviceConnected && oldDeviceConnected) {
@@ -282,4 +323,58 @@ char sr8500_searchByUUID(const char* ptrUUID)
   }
 
   return retVal;
+}
+
+int keypadLut[] = {
+  1023, 970, 850, 765,
+  642, 605, 567, 538,
+  474, 442, 429, 398,
+  362, 287, 231, 199
+};
+
+char analogKeypadUpdate(int analogPin)
+{
+  int analogValue = 0;
+  char key = 0;
+  char retVal;
+  
+  for(key=0; key<8; key++)
+  {
+    analogValue += analogRead(keypadPin) >> 2; //reduce to 10-bit value
+    //if(analogValue > 0) Serial.printf("val=%u\n", analogValue);
+  }
+  analogValue /= 8; //get oversampled average.
+  
+  key = 0;
+  while(analogValue <= keypadLut[key])
+  {
+    key++;
+    if(key == 16)
+    { 
+      retVal = key;
+      break;
+    }
+  }
+
+  if((key != 16) && (key != 1))
+  {
+    //TODO: find which of the adjacent three LUT values are closest to our sample.
+    int val1 = keypadLut[key-1] - analogValue;
+    int val2 = analogValue - keypadLut[key];
+    int val3 = analogValue - keypadLut[key+1];
+    int minimum = min(min(val1, val2), val3);
+    if(minimum == val1) retVal = key-1;
+    if(minimum == val2) retVal = key;
+    else retVal = key+1;
+    Serial.printf("val1=%u, val2=%u, val3=%u, min=%u, retVal=%u\n", val1, val2, val3, minimum, retVal);
+    /*
+    if((analogValue - keypadLut[key-1]) >= (analogValue - keypadLut[key-2]))
+    {
+      key--;
+    }
+    */
+  }
+  
+  return retVal;
+  //return 0;
 }
