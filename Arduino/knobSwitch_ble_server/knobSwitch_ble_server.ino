@@ -180,18 +180,83 @@ void setup() {
 }
 
 void loop() {
+//=====================================
+  char keyNew = 0;
+  bool keyPressed = false;
+  char strTemp[16] = "";
 
   if(millis() >= time_now + 100) //every 100ms
   {
-    char keyNew = analogKeypadUpdate(keypadPin);
+    keyNew = analogKeypadUpdate(keypadPin);
     if(keyOld != keyNew)
     {
       Serial.printf("%u\n", keyNew);
+      keyPressed = true;
       keyOld = keyNew;
     }
 
     time_now = millis();
   }
+
+  if(keyPressed)
+  {
+    switch(keyNew)
+    {
+      case 0:
+        sprintf(strTemp, "MNCLT");
+      break;
+
+      case 1:
+        sprintf(strTemp, "MNCUP");
+      break;
+
+      case 2:
+        sprintf(strTemp, "MNCRT");
+      break;
+
+      case 3:
+        sprintf(strTemp, "MNCDN");
+      break;
+
+      case 4:
+        sprintf(strTemp, "MNENT");
+      break;
+
+      case 5:
+        sprintf(strTemp, "MNRTN");
+      break;
+
+      case 6:
+        sprintf(strTemp, "MNMEN ON");
+      break;
+
+      case 7:
+        sprintf(strTemp, "MNMEN OFF");
+      break;
+      
+      case 8:
+
+      break;
+
+      default:
+      break;
+    }
+
+    if(keyNew <= 5)
+    {
+      Serial.printf("-> %.5s\n", strTemp);
+      Serial1.printf("%.5s\r", strTemp);
+    }
+    
+    if(keyNew >= 6)
+    {
+      Serial.printf("-> %.9s\n", strTemp);
+      Serial1.printf("%.9s\r", strTemp);
+    }
+    
+    keyPressed = false;
+  }
+//=====================================
 
   // disconnecting
   if(!deviceConnected && oldDeviceConnected) {
@@ -329,52 +394,39 @@ int keypadLut[] = {
   1023, 970, 850, 765,
   642, 605, 567, 538,
   474, 442, 429, 398,
-  362, 287, 231, 199
+  362, 287, 231, 199, 0
 };
 
 char analogKeypadUpdate(int analogPin)
 {
   int analogValue = 0;
+  char i;
   char key = 0;
   char retVal;
+  int diff[16];
   
-  for(key=0; key<8; key++)
+  for(i=0; i<8; i++)
   {
     analogValue += analogRead(keypadPin) >> 2; //reduce to 10-bit value
-    //if(analogValue > 0) Serial.printf("val=%u\n", analogValue);
   }
   analogValue /= 8; //get oversampled average.
   
-  key = 0;
-  while(analogValue <= keypadLut[key])
+  for(i=0; i<16+1; i++)
   {
-    key++;
-    if(key == 16)
-    { 
-      retVal = key;
-      break;
+    if(analogValue <= keypadLut[i])
+    {
+      diff[i] = keypadLut[i] - analogValue;
     }
+    else diff[i] = analogValue - keypadLut[i];
   }
 
-  if((key != 16) && (key != 1))
+  char minimumIndex = 0;
+  for(i=0; i<16+1; i++)
   {
-    //TODO: find which of the adjacent three LUT values are closest to our sample.
-    int val1 = keypadLut[key-1] - analogValue;
-    int val2 = analogValue - keypadLut[key];
-    int val3 = analogValue - keypadLut[key+1];
-    int minimum = min(min(val1, val2), val3);
-    if(minimum == val1) retVal = key-1;
-    if(minimum == val2) retVal = key;
-    else retVal = key+1;
-    Serial.printf("val1=%u, val2=%u, val3=%u, min=%u, retVal=%u\n", val1, val2, val3, minimum, retVal);
-    /*
-    if((analogValue - keypadLut[key-1]) >= (analogValue - keypadLut[key-2]))
-    {
-      key--;
-    }
-    */
+    if(diff[i] < diff[minimumIndex]) minimumIndex = i;
   }
+  //Serial.printf("minIdx=%u\n", minimumIndex);
+  retVal = minimumIndex;
   
   return retVal;
-  //return 0;
 }
