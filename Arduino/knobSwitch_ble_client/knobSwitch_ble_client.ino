@@ -3,6 +3,8 @@
 #include <SimpleRotary.h>
 #include <M5Stack.h>
 
+unsigned long time_now = 0;
+
 // Pin A, Pin B, Button Pin
 SimpleRotary rotary(35,36,26);
 
@@ -61,6 +63,57 @@ const sr8500_property_map sr8500Map[] = {
 
 #define SR8500_NUMCHARS (sizeof(sr8500Map)/sizeof(sr8500_property_map))
 
+struct sr5010_property_map {
+  char uuid[37];
+  char statusStr[9]; //up to 8-character prefix (wtf!)
+};
+
+const sr5010_property_map sr5010Map[] = {
+  {"bb0dae34-05cb-4290-a8c4-6dad813e82e2", "PW"},
+  {"88e1ef43-9804-411d-a1f9-f6cdbda9a9a9", "MV"},
+  {"60ef9a3d-5a67-464a-b7bf-fe1c187828f1", "MU"},
+  {"c21d2540-fe05-43d7-b929-54b76140e030", "SI"},
+  {"a6b89a0b-c740-4b82-bba5-df717b4163d5", "SV"},
+  {"0969d2b6-60d8-4a1b-a88c-8457449a453e", "TFHD"}
+};
+
+#define SR5010_NUMCHARS (sizeof(sr5010Map)/sizeof(sr5010_property_map))
+
+//{argument's associated characteristic index, argument length}
+const char sr5010MapArgsTab[][2] = {
+  {0, 2}, {0, 7},
+  {1, 2}, {1, 4},
+  {2, 2}, {2, 3},
+  {3, 2}, {3, 2}, {3, 5}, {3, 7},
+  {4, 2}, {4, 2}, {4, 5}
+};
+
+//{outgoing argument strings}
+const char sr5010MapArgsOut[][8] = {
+  "ON", "STANDBY",
+  "UP", "DOWN",
+  "ON", "OFF",
+  "CD", "TV", "TUNER", "HDRADIO",
+  "TV", "BD", "V.AUX"
+};
+
+/*
+//{incoming argument formats}
+const char sr5010MapArgsIn[] = {
+  's', //contains only a string
+  's',
+  's',
+  's',
+  's',
+  'd' //contains a decimal value and possibly a string
+}
+*/
+
+//keeps track of all local control states.
+char sr5010MapLocalState[SR5010_NUMCHARS];
+
+BLECharacteristic* sr5010_chars_ptr[SR5010_NUMCHARS];
+
 char sr8500_searchByUUID(const char*);
 char sr8500_searchByCmd(char*);
 
@@ -94,6 +147,7 @@ class MyClientCallback : public BLEClientCallbacks {
   void onConnect(BLEClient* pclient) {
     Serial.println("Connected.");
     M5.Lcd.println("Connected.");
+    M5.Lcd.printf("%lums\n", time_now);
     M5.update();
   }
 
@@ -131,22 +185,22 @@ bool connectToServer() {
     M5.update();
 
     //register all characteristics for realtime notification.
-    for(int i = 0; i < SR8500_NUMCHARS; i++)
+    for(int i = 0; i < SR5010_NUMCHARS; i++)
     {
-        pRemoteCharacteristic = pRemoteService->getCharacteristic(sr8500Map[i].uuid);
+        pRemoteCharacteristic = pRemoteService->getCharacteristic(sr5010Map[i].uuid);
         if (pRemoteCharacteristic != nullptr) 
         {
           if(pRemoteCharacteristic->canNotify())
           {
-            Serial.printf("%s can notify.\n", sr8500Map[i].uuid);
-            M5.Lcd.printf("%s can notify.\n", sr8500Map[i].uuid);
+            Serial.printf("%s can notify.\n", sr5010Map[i].uuid);
+            M5.Lcd.printf("%s can notify.\n", sr5010Map[i].uuid);
             M5.update();
             pRemoteCharacteristic->registerForNotify(notifyCallback);
           }
           else
           {
-            Serial.printf("%s can NOT notify.\n", sr8500Map[i].uuid);
-            M5.Lcd.printf("%s can NOT notify.\n", sr8500Map[i].uuid);
+            Serial.printf("%s can NOT notify.\n", sr5010Map[i].uuid);
+            M5.Lcd.printf("%s can NOT notify.\n", sr5010Map[i].uuid);
             M5.update();
           }
         }
@@ -226,10 +280,18 @@ char sr8500_searchByUUID(const char* ptrUUID)
 
 void setup() {
 
+  int i = 0;
+  time_now = millis();
+
   //pins are pulled up by hardware and inputs at POR.
   //pinMode(39, INPUT_PULLUP); //Button A
   //pinMode(38, INPUT_PULLUP); //Button B
   //pinMode(37, INPUT_PULLUP); //Button C
+
+  for(i = 0; i<SR5010_NUMCHARS; i++)
+  {
+    sr5010MapLocalState[i] = 0;
+  }
 
   // initialize the M5Stack object
   M5.begin();
@@ -285,26 +347,28 @@ void loop() {
     char i;
     char c;
     char txBuf[16];
+    char argOffset;
     //BLERemoteCharacteristic RemoteCharacteristic;
     BLERemoteCharacteristic* pRemoteCharacteristic; //= &RemoteCharacteristic;
 
     i = digitalRead(39);
     if(!i) //button A
     {
-      c = '0'; //toggle power.
+      sr5010MapLocalState[0] ^= 1; //toggle power state.
+      argOffset = 0;
       
       //Get remote characteristic.
       if(pRemoteService != nullptr)
       {
-        pRemoteCharacteristic = pRemoteService->getCharacteristic(sr8500Map[0].uuid);
+        pRemoteCharacteristic = pRemoteService->getCharacteristic(sr5010Map[0].uuid);
         if (pRemoteCharacteristic == nullptr) {
           Serial.println("Can't find characteristic.");
         }
-        Serial.printf("-> %s: ", sr8500Map[0].uuid);
+        Serial.printf("-> %s: ", sr5010Map[0].uuid);
     
         //Write value to remote characteristic.
         if(pRemoteCharacteristic->canWrite()) {
-          sprintf(txBuf, "@%s:%c\r", sr8500Map[0].statusStr, c);
+          sprintf(txBuf, "%s%s\r", sr5010Map[0].statusStr, &sr5010MapArgsOut[argOffset+sr5010MapLocalState[0]]);
           Serial.println(txBuf);
           pRemoteCharacteristic->writeValue(txBuf);
         }
@@ -329,6 +393,8 @@ void loop() {
         //Serial.println("CCW");
         c = '2'; //volume down.
       }
+
+      argOffset = ;
 
       //Get remote characteristic.
       if(pRemoteService != nullptr)
