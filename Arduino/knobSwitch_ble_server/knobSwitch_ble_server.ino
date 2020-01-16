@@ -3,6 +3,10 @@
 #include <BLEServer.h>
 #include <string.h>
 #include <stdio.h>
+#include "esp_bt_main.h"
+#include "esp_bt_device.h"
+#include <Arduino.h>
+#include "esp32-hal-log.h"
 
 int keypadPin = 36;
 char keyOld;
@@ -153,12 +157,11 @@ class MyCallbacks: public BLECharacteristicCallbacks {
       //fetch command string index using UUID
       char i = 0;
       i = sr5010_searchByUUID(strUUID.c_str());
-      Serial.printf("i=%u\n", i);
+      Serial.printf("%u\n",i);
       
       if(i != 0xFF)
       {
         int valNum = atoi(val.c_str()); // get argument index
-        Serial.println(valNum);
   
         char j = 0;
         char argIndex = 0;
@@ -169,7 +172,6 @@ class MyCallbacks: public BLECharacteristicCallbacks {
           argIndex += sr5010Map[j].numArgs;
         }
         argIndex += valNum; //add argument string minor index
-        Serial.println(argIndex);
       
         //write to serial port.
         Serial.printf("-> %s%s\n", sr5010Map[i].statusStr, sr5010MapArgsOut[argIndex]);
@@ -178,27 +180,57 @@ class MyCallbacks: public BLECharacteristicCallbacks {
     };
 };
 
+void printDeviceAddress() {
+ 
+  const uint8_t* point = esp_bt_dev_get_address();
+  Serial.print("MAC is ");
+ 
+  for (int i = 0; i < 6; i++) {
+ 
+    char str[3];
+ 
+    sprintf(str, "%02X", (int)point[i]);
+    Serial.print(str);
+ 
+    if (i < 5){
+      Serial.print(":");
+    }
+ 
+  }
+  Serial.println("");
+}
+
 BLEServer *pServer;
 BLEService *pService;
 
 void setup() {
+Serial.setDebugOutput(true);
+esp_log_level_set("*",ESP_LOG_VERBOSE);
+
+  
   Serial.begin(115200);
   Serial.println("Starting BLE.");
 
   Serial1.begin(9600, SERIAL_8N1, 5, 4); //pin 4=TXD, pin 5=RXD.
 
-  BLEDevice::init("Marantz SR5010");
+  //INFO: https://github.com/nkolban/esp32-snippets/issues/144
+  BLEDevice::init("SR5010");
   pServer = BLEDevice::createServer();
-  pService = pServer->createService(BLEUUID(SERVICE_UUID), SR5010_NUMCHARS, 0);
+  pService = pServer->createService(BLEUUID(SERVICE_UUID), 10); //SR5010_NUMCHARS);
   BLECharacteristic *pCharacteristic;
+
+  printDeviceAddress();
   
+  Serial.println("Creating characteristics:");
   int i;
   for(i = 0; i<SR5010_NUMCHARS; i++)
   {
+    Serial.println(sr5010Map[i].uuid);
     sr5010_chars_ptr[i] = pService->createCharacteristic(sr5010Map[i].uuid,
     BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
     sr5010_chars_ptr[i]->setCallbacks(new MyCallbacks());
   }
+  Serial.printf("Created %u characteristics.\n", i);
 
 /*
   for(int i = SR5010_NUMCHARS; i<SR5010_NUMCHARS; i++)
@@ -210,12 +242,12 @@ void setup() {
 */
   
   pService->start();
-  BLEAdvertising *pAdvertising = BLEDevice::getAdvertising();
-  pAdvertising->addServiceUUID(SERVICE_UUID);
+  BLEAdvertising *pAdvertising = pServer->getAdvertising();
+  pAdvertising->addServiceUUID(pService->getUUID());
   pAdvertising->setScanResponse(true);
   pAdvertising->setMinPreferred(0x06);  // functions that help with iPhone connections issue
   pAdvertising->setMinPreferred(0x12);
-  BLEDevice::startAdvertising();
+  pAdvertising->start();
   Serial.println("Started BLE.");
   
   //read/refresh all statuses.
@@ -337,7 +369,7 @@ int processUpdateSerial(char* strUpdate)
 {
   Serial.printf("<- %s\n", strUpdate); //print incoming string to console.
   
-  //isolate multiple updates within one response using '@' token.
+  //isolate multiple updates within one response using <CR> token.
   int init_size = strlen(strUpdate);
   char delim[] = "\r";
   char len = 0;
@@ -359,7 +391,7 @@ int processUpdateSerial(char* strUpdate)
       len = strlen(ptr);
       memcpy(statusStr, &ptr[2], len-2); //isolate last character(s).
       statusStr[len-2] = '\0';
-      Serial.printf("Matched %.2s, len: %d value: %s\n", ptr, len, statusStr);
+      //Serial.printf("Matched %.2s, len: %d value: %s\n", ptr, len, statusStr);
       
       //update characteristic value with received status value.
       sr5010_chars_ptr[i]->setValue(statusStr);
@@ -476,11 +508,7 @@ char sr5010_searchByUUID(const char* ptrUUID)
   int match = 0;
   while(i<SR5010_NUMCHARS && !match)
   {
-    Serial.printf("ptrUUID=%s\n", ptrUUID);
-    Serial.printf("sr5010Map.uuid==%s\n", sr5010Map[i].uuid);
-    
     c = strcmp(ptrUUID, sr5010Map[i].uuid);
-    Serial.printf("strcmp=%u\n", c);
     
     if(c == 0) //we found a match.
     {
@@ -514,7 +542,7 @@ char analogKeypadUpdate(int analogPin)
   }
   analogValue /= 8; //get oversampled average.
   
-  for(i=0; i<16+1; i++)
+  for(i=0; i<(sizeof(keypadLut)/sizeof(keypadLut[0])); i++)
   {
     if(analogValue <= keypadLut[i])
     {
@@ -524,7 +552,7 @@ char analogKeypadUpdate(int analogPin)
   }
 
   char minimumIndex = 0;
-  for(i=0; i<16+1; i++)
+  for(i=0; i<(sizeof(keypadLut)/sizeof(keypadLut[0])); i++)
   {
     if(diff[i] < diff[minimumIndex]) minimumIndex = i;
   }
