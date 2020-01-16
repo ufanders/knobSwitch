@@ -71,21 +71,56 @@ BLECharacteristic* sr8500_chars_ptr[SR8500_NUMCHARS];
 struct sr5010_property_map {
   char uuid[37];
   char statusStr[9]; //up to 8-character prefix (wtf!)
+  int numArgs;
 };
 
 const sr5010_property_map sr5010Map[] = {
-  {"bb0dae34-05cb-4290-a8c4-6dad813e82e2", "PW"},
-  {"88e1ef43-9804-411d-a1f9-f6cdbda9a9a9", "MV"},
-  {"60ef9a3d-5a67-464a-b7bf-fe1c187828f1", "MU"},
-  {"bfac98ba-7d94-41ff-8c06-be0a5a13ecaf", "MN"},
-  {"c21d2540-fe05-43d7-b929-54b76140e030", "SI"},
-  {"a6b89a0b-c740-4b82-bba5-df717b4163d5", "SV"},
-  {"0969d2b6-60d8-4a1b-a88c-8457449a453e", "TFHD"}
+  {"bb0dae34-05cb-4290-a8c4-6dad813e82e2", "PW", 2},
+  {"88e1ef43-9804-411d-a1f9-f6cdbda9a9a9", "MV", 2},
+  {"60ef9a3d-5a67-464a-b7bf-fe1c187828f1", "MU", 2},
+  {"c21d2540-fe05-43d7-b929-54b76140e030", "SI", 4},
+  {"a6b89a0b-c740-4b82-bba5-df717b4163d5", "SV", 3},
+  {"0969d2b6-60d8-4a1b-a88c-8457449a453e", "TFHD", 0}
 };
+
+/*
+//{argument's associated characteristic index, argument length}
+const char sr5010MapArgsTab[][2] = {
+  {0, 2}, {0, 7},
+  {1, 2}, {1, 4},
+  {2, 2}, {2, 3},
+  {3, 2}, {3, 2}, {3, 5}, {3, 7},
+  {4, 2}, {4, 2}, {4, 5}
+};
+*/
+
+//{outgoing argument strings}
+const char sr5010MapArgsOut[][8] = {
+  "ON", "STANDBY",
+  "UP", "DOWN",
+  "ON", "OFF",
+  "CD", "TV", "TUNER", "HDRADIO",
+  "TV", "BD", "V.AUX"
+};
+
+/*
+//{incoming argument formats}
+const char sr5010MapArgsIn[] = {
+  's', //contains only a string
+  's',
+  's',
+  's',
+  's',
+  'd' //contains a decimal value and possibly a string
+}
+*/
 
 #define SR5010_NUMCHARS (sizeof(sr5010Map)/sizeof(sr5010_property_map))
 
 BLECharacteristic* sr5010_chars_ptr[SR5010_NUMCHARS];
+
+char sr5010_searchByUUID(const char*);
+char sr5010_searchByCmd(char*);
 
 char sr8500_searchByUUID(const char*);
 char sr8500_searchByCmd(char*);
@@ -107,19 +142,38 @@ class MyServerCallbacks: public BLEServerCallbacks {
 
 class MyCallbacks: public BLECharacteristicCallbacks {
     void onWrite(BLECharacteristic *pCharacteristic) {
+
+      //INFO: https://github.com/espressif/arduino-esp32/issues/3153
       
       std::string val = pCharacteristic->getValue();
       std::string strUUID = pCharacteristic->getUUID().toString();
 
-      //fetch command string using UUID
-      char i = 0;
-      i = sr8500_searchByUUID(strUUID.c_str());
+      Serial.printf("~> %s: %s\n", strUUID.c_str(), val.c_str());
 
+      //fetch command string index using UUID
+      char i = 0;
+      i = sr5010_searchByUUID(strUUID.c_str());
+      Serial.printf("i=%u\n", i);
+      
       if(i != 0xFF)
       {
+        int valNum = atoi(val.c_str()); // get argument index
+        Serial.println(valNum);
+  
+        char j = 0;
+        char argIndex = 0;
+  
+        //find argument string major index
+        for(j = 0; j < i; j++)
+        {
+          argIndex += sr5010Map[j].numArgs;
+        }
+        argIndex += valNum; //add argument string minor index
+        Serial.println(argIndex);
+      
         //write to serial port.
-        Serial.printf("-> %.3s%s\n", sr5010Map[i].statusStr, val.c_str());
-        Serial1.printf("%.3s%s\r", sr5010Map[i].statusStr, val.c_str());
+        Serial.printf("-> %s%s\n", sr5010Map[i].statusStr, sr5010MapArgsOut[argIndex]);
+        Serial1.printf("%s%s\r", sr5010Map[i].statusStr, sr5010MapArgsOut[argIndex]);
       }
     };
 };
@@ -165,7 +219,7 @@ void setup() {
   Serial.println("Started BLE.");
   
   //read/refresh all statuses.
-  for(i=0; i<SR5010_NUMCHARS-1; i++)
+  for(i=0; i<SR5010_NUMCHARS-2; i++)
   {
     Serial.printf("-> %s?\n", sr5010Map[i].statusStr);
     Serial1.printf("%s?\r", sr5010Map[i].statusStr);
@@ -174,7 +228,6 @@ void setup() {
   }
 
   keyOld = 0;
-  //analogSetWidth(10);
 
   time_now = millis();
 }
@@ -286,7 +339,7 @@ int processUpdateSerial(char* strUpdate)
   
   //isolate multiple updates within one response using '@' token.
   int init_size = strlen(strUpdate);
-  char delim[] = "@";
+  char delim[] = "\r";
   char len = 0;
 
   char *ptr = strtok(strUpdate, delim);
@@ -298,18 +351,18 @@ int processUpdateSerial(char* strUpdate)
     //parse update string and update corresponding characteristic value.
     char statusStr[16];
 
-    i = sr8500_searchByCmd(ptr);
+    i = sr5010_searchByCmd(ptr);
 
     if(i != 0xff)
     {
       match = 1;
       len = strlen(ptr);
-      memcpy(statusStr, &ptr[4], len-4); //isolate last character(s).
-      statusStr[len-4] = '\0';
-      Serial.printf("Matched %.3s, len: %d value: %s\n", ptr, len, statusStr);
+      memcpy(statusStr, &ptr[2], len-2); //isolate last character(s).
+      statusStr[len-2] = '\0';
+      Serial.printf("Matched %.2s, len: %d value: %s\n", ptr, len, statusStr);
       
       //update characteristic value with received status value.
-      sr8500_chars_ptr[i]->setValue(statusStr);
+      sr5010_chars_ptr[i]->setValue(statusStr);
     }
     else Serial.println("\nNo match.");
 
@@ -378,6 +431,56 @@ char sr8500_searchByUUID(const char* ptrUUID)
   while(i<SR8500_NUMCHARS && !match)
   {
     c = strcmp(ptrUUID, sr8500Map[i].uuid);
+    
+    if(c == 0) //we found a match.
+    {
+      match = 1;
+      retVal = i;
+    }
+    else i++;
+  }
+
+  return retVal;
+}
+
+char sr5010_searchByCmd(char* ptrCmd)
+{
+  char retVal = 0xFF; //No match found.
+
+  //search for the characteristic the received status update corresponds to.
+  int i = 0;
+  int c = 0;
+  int match = 0;
+  while(i<SR5010_NUMCHARS && !match)
+  {
+    c = memcmp(ptrCmd, sr5010Map[i].statusStr, 2);
+    
+    if(c == 0) //we found a match.
+    {
+      match = 1;
+      retVal = i;
+    }
+    else i++;
+  }
+
+  return retVal;
+}
+
+char sr5010_searchByUUID(const char* ptrUUID)
+{
+  char retVal = 0xFF; //No match found.
+
+  //search for the command the written characteristic maps to.
+  int i = 0;
+  int c = 0;
+  int match = 0;
+  while(i<SR5010_NUMCHARS && !match)
+  {
+    Serial.printf("ptrUUID=%s\n", ptrUUID);
+    Serial.printf("sr5010Map.uuid==%s\n", sr5010Map[i].uuid);
+    
+    c = strcmp(ptrUUID, sr5010Map[i].uuid);
+    Serial.printf("strcmp=%u\n", c);
     
     if(c == 0) //we found a match.
     {
