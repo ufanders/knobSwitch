@@ -84,7 +84,8 @@ const sr5010_property_map sr5010Map[] = {
   {"60ef9a3d-5a67-464a-b7bf-fe1c187828f1", "MU", 2},
   {"c21d2540-fe05-43d7-b929-54b76140e030", "SI", 4},
   {"a6b89a0b-c740-4b82-bba5-df717b4163d5", "SV", 3},
-  {"0969d2b6-60d8-4a1b-a88c-8457449a453e", "TFHD", 0}
+  //{"0969d2b6-60d8-4a1b-a88c-8457449a453e", "TFHD", 0},
+  {"0969d2b6-60d8-4a1b-a88c-8457449a453e", "TFAN", 0}
 };
 
 /*
@@ -125,6 +126,7 @@ BLECharacteristic* sr5010_chars_ptr[SR5010_NUMCHARS];
 
 char sr5010_searchByUUID(const char*);
 char sr5010_searchByCmd(char*);
+char sr5010_searchByArg(int cmdIndex, char* ptrArg);
 
 char sr8500_searchByUUID(const char*);
 char sr8500_searchByCmd(char*);
@@ -204,9 +206,8 @@ BLEServer *pServer;
 BLEService *pService;
 
 void setup() {
-Serial.setDebugOutput(true);
-esp_log_level_set("*",ESP_LOG_VERBOSE);
-
+  Serial.setDebugOutput(true);
+  esp_log_level_set("*",ESP_LOG_VERBOSE);
   
   Serial.begin(115200);
   Serial.println("Starting BLE.");
@@ -216,6 +217,8 @@ esp_log_level_set("*",ESP_LOG_VERBOSE);
   //INFO: https://github.com/nkolban/esp32-snippets/issues/144
   BLEDevice::init("SR5010");
   pServer = BLEDevice::createServer();
+  //INFO: https://github.com/nkolban/esp32-snippets/issues/114
+  //INFO: https://github.com/espressif/esp-idf/issues/1087
   pService = pServer->createService(BLEUUID(SERVICE_UUID), 10); //SR5010_NUMCHARS);
   BLECharacteristic *pCharacteristic;
 
@@ -372,7 +375,7 @@ int processUpdateSerial(char* strUpdate)
   //isolate multiple updates within one response using <CR> token.
   int init_size = strlen(strUpdate);
   char delim[] = "\r";
-  char len = 0;
+  char lenCmd, lenArg;
 
   char *ptr = strtok(strUpdate, delim);
   int match;
@@ -388,15 +391,34 @@ int processUpdateSerial(char* strUpdate)
     if(i != 0xff)
     {
       match = 1;
-      len = strlen(ptr);
-      memcpy(statusStr, &ptr[2], len-2); //isolate last character(s).
-      statusStr[len-2] = '\0';
-      //Serial.printf("Matched %.2s, len: %d value: %s\n", ptr, len, statusStr);
+      lenCmd = strlen(sr5010Map[i].statusStr);
+      lenArg = strlen(ptr) - lenCmd;
       
-      //update characteristic value with received status value.
-      sr5010_chars_ptr[i]->setValue(statusStr);
+      memcpy(statusStr, &ptr[lenCmd], lenArg); //separate base command from argument.
+      statusStr[lenArg] = '\0'; //terminate string.
+      Serial.printf("[i] cmd: %s, len: %d, arg: %s, len: %d\n", ptr, lenCmd, statusStr, lenArg);
+
+      //TODO: check if argument is numeric. Store as string in characteristic value.
+      if(isDigit(statusStr[0]))
+      {
+        sr5010_chars_ptr[i]->setValue(statusStr);
+        Serial.printf("^ %s\n", sr5010_chars_ptr[i]->getValue().c_str());
+      }
+      else
+      {
+        //TODO: if not, compare argument against arg string list.
+        char j = sr5010_searchByArg(i, statusStr);
+        if(j != 0xFF)
+        {
+          //TODO: if a match is found, insert the arg string index as characteristic value.
+          itoa(j, statusStr, 10);
+          sr5010_chars_ptr[i]->setValue(statusStr);
+          Serial.printf("^ %s\n", sr5010_chars_ptr[i]->getValue().c_str());
+        }
+        else Serial.println("\nNo Arg match.");
+      }
     }
-    else Serial.println("\nNo match.");
+    else Serial.println("\nNo Cmd match.");
 
     ptr = strtok(NULL, delim); //parse next token.
   }
@@ -483,9 +505,15 @@ char sr5010_searchByCmd(char* ptrCmd)
   int i = 0;
   int c = 0;
   int match = 0;
+  char len = 0;
+
+  //take length of each available command string.
+  //compare over length of that string.
+  
   while(i<SR5010_NUMCHARS && !match)
   {
-    c = memcmp(ptrCmd, sr5010Map[i].statusStr, 2);
+    len = strlen(sr5010Map[i].statusStr);
+    c = memcmp(ptrCmd, sr5010Map[i].statusStr, len);
     
     if(c == 0) //we found a match.
     {
@@ -494,6 +522,46 @@ char sr5010_searchByCmd(char* ptrCmd)
     }
     else i++;
   }
+
+  return retVal;
+}
+
+char sr5010_searchByArg(int cmdIndex, char* ptrArg)
+{
+  char retVal = 0xFF; //No match found.
+
+  //search for the characteristic the received status update corresponds to.
+  int i = 0;
+  int j = 0; 
+  int k = 0;
+  int c = 0;
+  int match = 0;
+  char len = 0;
+
+  //take length of each available command string.
+  //compare over length of that string.
+
+  for(int h=0; h<cmdIndex; h++)
+  {
+    j += sr5010Map[h].numArgs;
+  }
+  k = j; //+ cmdIndex;
+  
+  do
+  {
+    len = strlen(sr5010MapArgsOut[k]);
+    Serial.printf("ptrArg: %s, Arg:%s\n", ptrArg, sr5010MapArgsOut[k]);
+    
+    c = memcmp(ptrArg, sr5010MapArgsOut[k], len);
+    
+    if(c == 0) //we found a match.
+    {
+      match = 1;
+      retVal = k;
+    }
+    else k++;
+    
+  } while(i < sr5010Map[cmdIndex].numArgs && !match);
 
   return retVal;
 }
