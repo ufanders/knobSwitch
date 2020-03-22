@@ -83,7 +83,7 @@ const sr5010_property_map sr5010Map[] = {
   {"88e1ef43-9804-411d-a1f9-f6cdbda9a9a9", "MV", 2},
   {"60ef9a3d-5a67-464a-b7bf-fe1c187828f1", "MU", 2},
   {"c21d2540-fe05-43d7-b929-54b76140e030", "SI", 4},
-  {"a6b89a0b-c740-4b82-bba5-df717b4163d5", "SV", 3},
+  {"a6b89a0b-c740-4b82-bba5-df717b4163d5", "SV", 4},
   //{"0969d2b6-60d8-4a1b-a88c-8457449a453e", "TFHD", 0},
   {"0969d2b6-60d8-4a1b-a88c-8457449a453e", "TFAN", 0}
 };
@@ -105,7 +105,7 @@ const char sr5010MapArgsOut[][8] = {
   "UP", "DOWN",
   "ON", "OFF",
   "CD", "TV", "TUNER", "HDRADIO",
-  "TV", "BD", "V.AUX"
+  "OFF", "TV", "BD", "V.AUX"
 };
 
 /*
@@ -402,7 +402,7 @@ int processUpdateSerial(char* strUpdate)
       if(isDigit(statusStr[0]))
       {
         sr5010_chars_ptr[i]->setValue(statusStr);
-        Serial.printf("^ %s\n", sr5010_chars_ptr[i]->getValue().c_str());
+        Serial.printf("statusStr: %s, ^ %s\n", statusStr, sr5010_chars_ptr[i]->getValue().c_str());
       }
       else
       {
@@ -413,7 +413,7 @@ int processUpdateSerial(char* strUpdate)
           //TODO: if a match is found, insert the arg string index as characteristic value.
           itoa(j, statusStr, 10);
           sr5010_chars_ptr[i]->setValue(statusStr);
-          Serial.printf("^ %s\n", sr5010_chars_ptr[i]->getValue().c_str());
+          Serial.printf("statusStr: %s, ^ %s\n", statusStr, sr5010_chars_ptr[i]->getValue().c_str());
         }
         else Serial.println("\nNo Arg match.");
       }
@@ -531,6 +531,7 @@ char sr5010_searchByArg(int cmdIndex, char* ptrArg)
   char retVal = 0xFF; //No match found.
 
   //search for the characteristic the received status update corresponds to.
+  int h = 0;
   int i = 0;
   int j = 0; 
   int k = 0;
@@ -541,10 +542,11 @@ char sr5010_searchByArg(int cmdIndex, char* ptrArg)
   //take length of each available command string.
   //compare over length of that string.
 
-  for(int h=0; h<cmdIndex; h++)
+  for(h=0; h<cmdIndex; h++)
   {
     j += sr5010Map[h].numArgs;
   }
+  Serial.printf("h=%d, j=%d\n", h, j);
   k = j; //+ cmdIndex;
   
   do
@@ -557,9 +559,11 @@ char sr5010_searchByArg(int cmdIndex, char* ptrArg)
     if(c == 0) //we found a match.
     {
       match = 1;
-      retVal = k;
+      retVal = i;
     }
     else k++;
+
+    i++;
     
   } while(i < sr5010Map[cmdIndex].numArgs && !match);
 
