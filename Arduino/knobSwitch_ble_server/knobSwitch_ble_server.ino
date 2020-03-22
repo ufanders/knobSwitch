@@ -272,13 +272,14 @@ void loop() {
   char keyNew = 0;
   bool keyPressed = false;
   char strTemp[16] = "";
+  bool keySuppress = false;
 
   if(millis() >= time_now + 100) //every 100ms
   {
     keyNew = analogKeypadUpdate(keypadPin);
     if(keyOld != keyNew)
     {
-      Serial.printf("%u\n", keyNew);
+      Serial.printf("Key: %u\n", keyNew);
       keyPressed = true;
       keyOld = keyNew;
     }
@@ -321,25 +322,25 @@ void loop() {
       case 7:
         sprintf(strTemp, "MNMEN OFF");
       break;
-      
-      case 8:
-
-      break;
 
       default:
+        keySuppress = true;
       break;
     }
 
-    if(keyNew <= 5)
+    if(!keySuppress)
     {
-      Serial.printf("-> %.5s\n", strTemp);
-      Serial1.printf("%.5s\r", strTemp);
-    }
-    
-    if(keyNew >= 6)
-    {
-      Serial.printf("-> %.9s\n", strTemp);
-      Serial1.printf("%.9s\r", strTemp);
+      if(keyNew <= 5)
+      {
+        Serial.printf("-> %.5s\n", strTemp);
+        Serial1.printf("%.5s\r", strTemp);
+      }
+      
+      if(keyNew >= 6)
+      {
+        Serial.printf("-> %.9s\n", strTemp);
+        Serial1.printf("%.9s\r", strTemp);
+      }
     }
     
     keyPressed = false;
@@ -390,7 +391,6 @@ int processUpdateSerial(char* strUpdate)
 
     if(i != 0xff)
     {
-      match = 1;
       lenCmd = strlen(sr5010Map[i].statusStr);
       lenArg = strlen(ptr) - lenCmd;
       
@@ -402,7 +402,7 @@ int processUpdateSerial(char* strUpdate)
       if(isDigit(statusStr[0]))
       {
         sr5010_chars_ptr[i]->setValue(statusStr);
-        Serial.printf("statusStr: %s, ^ %s\n", statusStr, sr5010_chars_ptr[i]->getValue().c_str());
+        match = 1;
       }
       else
       {
@@ -413,10 +413,12 @@ int processUpdateSerial(char* strUpdate)
           //TODO: if a match is found, insert the arg string index as characteristic value.
           itoa(j, statusStr, 10);
           sr5010_chars_ptr[i]->setValue(statusStr);
-          Serial.printf("statusStr: %s, ^ %s\n", statusStr, sr5010_chars_ptr[i]->getValue().c_str());
+          match = 1;
         }
-        else Serial.println("\nNo Arg match.");
       }
+
+      if(match) Serial.printf("^ %s\n", sr5010_chars_ptr[i]->getValue().c_str());
+      else Serial.println("\nNo Arg match.");
     }
     else Serial.println("\nNo Cmd match.");
 
@@ -531,10 +533,8 @@ char sr5010_searchByArg(int cmdIndex, char* ptrArg)
   char retVal = 0xFF; //No match found.
 
   //search for the characteristic the received status update corresponds to.
-  int h = 0;
   int i = 0;
   int j = 0; 
-  int k = 0;
   int c = 0;
   int match = 0;
   char len = 0;
@@ -542,26 +542,28 @@ char sr5010_searchByArg(int cmdIndex, char* ptrArg)
   //take length of each available command string.
   //compare over length of that string.
 
-  for(h=0; h<cmdIndex; h++)
+  Serial.printf("ptrArg: %s\nArgs: ", ptrArg);
+
+  for(i=0; i<cmdIndex; i++)
   {
-    j += sr5010Map[h].numArgs;
+    //skip to args for incoming command.
+    j += sr5010Map[i].numArgs;
   }
-  Serial.printf("h=%d, j=%d\n", h, j);
-  k = j; //+ cmdIndex;
-  
+
+  i = 0;  
   do
   {
-    len = strlen(sr5010MapArgsOut[k]);
-    Serial.printf("ptrArg: %s, Arg:%s\n", ptrArg, sr5010MapArgsOut[k]);
+    len = strlen(sr5010MapArgsOut[j]);
+    Serial.printf("%s | ", sr5010MapArgsOut[j]);
     
-    c = memcmp(ptrArg, sr5010MapArgsOut[k], len);
+    c = memcmp(ptrArg, sr5010MapArgsOut[j], len);
     
     if(c == 0) //we found a match.
     {
       match = 1;
       retVal = i;
     }
-    else k++;
+    else j++;
 
     i++;
     
