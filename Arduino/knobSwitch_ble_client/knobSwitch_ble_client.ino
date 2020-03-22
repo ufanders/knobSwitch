@@ -4,6 +4,8 @@
 #include <M5Stack.h>
 
 unsigned long time_now = 0;
+char batteryLevel, retries;
+bool sleepTimerExpired;
 
 // Pin A, Pin B, Button Pin
 SimpleRotary rotary(35,36,26);
@@ -141,7 +143,7 @@ bool connectToServer() {
     pClient->setClientCallbacks(new MyClientCallback());
 
     // Connect to the remote BLE Server.
-    Serial.printf("Connecting to %s", serverAddress);
+    Serial.printf("Connecting to %s.\n", serverAddress);
     //Serial.println(myDevice->getAddress().toString().c_str());
     pClient->connect(BLEAddress(serverAddress)); //myDevice);  // if you pass BLEAdvertisedDevice instead of address, it will be recognized type of peer device address (public or private)
 
@@ -304,6 +306,7 @@ void setup() {
 
   int i = 0;
   time_now = millis();
+  sleepTimerExpired = false;
 
   //pins are pulled up by hardware and inputs at POR.
   //pinMode(39, INPUT_PULLUP); //Button A
@@ -319,6 +322,23 @@ void setup() {
 
   // initialize the M5Stack object
   M5.begin();
+  /*
+    Power chip connected to gpio21, gpio22, I2C device
+    Set battery charging voltage and current
+    If used battery, please call this function in your project
+  */
+  M5.Power.begin();
+  M5.Lcd.setBrightness(200);
+
+  M5.Power.setWakeupButton(BUTTON_A_PIN);
+  if(M5.Power.canControl())
+  {
+    batteryLevel = M5.Power.getBatteryLevel();
+  }
+  else
+  {
+    M5.Lcd.println("PMIC not found.");
+  }
 
   // text print
   M5.Lcd.fillScreen(BLACK);
@@ -327,6 +347,7 @@ void setup() {
   M5.Lcd.setTextSize(1);
   Serial.println("Started LCD.");
   M5.Lcd.println("Started LCD.");
+  M5.Lcd.printf("Battery at %u%%.\n", batteryLevel);
   M5.update();
   
   Serial.begin(115200);
@@ -361,6 +382,7 @@ void setup() {
   //esp_deep_sleep_start();
 } // End of setup.
 
+RTC_DATA_ATTR char UIStatePrevious;
 
 // This is the Arduino main loop function.
 void loop() {
@@ -374,9 +396,28 @@ void loop() {
 
     BLERemoteCharacteristic* pRemoteCharacteristic;
 
+    //get all button input states at once.
+    i = rotary.rotate() | rotary.push() << 2 | (digitalRead(39) << 3) | \
+    (digitalRead(38) << 4) | (digitalRead(37) << 5);
+
+    if( i != UIStatePrevious)
+    {
+      //wake up LCD, reconnect to BLE server and process UI input.
+      M5.Lcd.fillScreen(BLACK);
+      M5.Lcd.setCursor(0, 0);
+      M5.Lcd.setBrightness(200);
+      M5.Lcd.printf("Battery at %u%%.\n", batteryLevel);
+      M5.update();
+
+      
+    }
+    UIStatePrevious = i;
+
     i = digitalRead(39);
     if(!i) //button A
     {
+      time_now = millis();
+      sleepTimerExpired = false;
       sr5010MapLocalState[0] ^= 1; //toggle power state.
       c = '0' + sr5010MapLocalState[0];
       
@@ -409,6 +450,9 @@ void loop() {
     i = rotary.rotate(); // 0 = not turning, 1 = CW, 2 = CCW
     if(i) //rotary encoder rotation
     {
+      time_now = millis();
+      sleepTimerExpired = false;
+      
       if (i == 1)
       {
         //Serial.println("CW");
@@ -443,6 +487,9 @@ void loop() {
 
     if(rotary.push()) //rotary encoder button.
     {
+      time_now = millis();
+      sleepTimerExpired = false;
+      
       sr5010MapLocalState[2] ^= 1; //toggle mute state.
       c = '0' + sr5010MapLocalState[2];
       
@@ -470,6 +517,9 @@ void loop() {
     i = digitalRead(38);
     if(!i) //button B
     {
+      time_now = millis();
+      sleepTimerExpired = false;
+      
       sr5010MapLocalState[3]++; //increment input state.
       if(sr5010MapLocalState[3] >= sr5010Map[3].numArgs) sr5010MapLocalState[3] = 0;
       
@@ -502,7 +552,8 @@ void loop() {
 
     if(0) //selector switch
     {
-      
+      time_now = millis();
+      sleepTimerExpired = false;
     }
     
   }
@@ -513,14 +564,33 @@ void loop() {
   if (doConnect == true) {
     if (connectToServer()) {
       Serial.println("BLE Connected.");
-    } else {
-      Serial.println("BLE not connected.");
+      retries = 0;
+      doConnect = false;
     }
-    doConnect = false;
+    else 
+    {
+      Serial.println("Retrying...");
+      retries++;
+    }
+
+    if(doConnect && (retries > 2))
+    {
+      Serial.println("BLE not connected.");
+      doConnect = false;
+    }
   }
   
   if(doScan){
     BLEDevice::getScan()->start(0);  // this is just eample to start scan after disconnect, most likely there is better way to do it in arduino
+  }
+
+  if(!sleepTimerExpired && (millis() - time_now >= 10000))
+  {
+    sleepTimerExpired = true;
+    Serial.println("Sleeping now.");
+    M5.Lcd.println("Sleeping now.");
+    M5.Lcd.setBrightness(0);
+    M5.update();
   }
 
   M5.update();
