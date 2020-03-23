@@ -159,7 +159,7 @@ class MyCallbacks: public BLECharacteristicCallbacks {
       //fetch command string index using UUID
       char i = 0;
       i = sr5010_searchByUUID(strUUID.c_str());
-      Serial.printf("%u\n",i);
+      //Serial.printf("%u\n",i);
       
       if(i != 0xFF)
       {
@@ -230,7 +230,8 @@ void setup() {
   {
     Serial.println(sr5010Map[i].uuid);
     sr5010_chars_ptr[i] = pService->createCharacteristic(sr5010Map[i].uuid,
-    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE);
+    BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_WRITE \
+    | BLECharacteristic::PROPERTY_NOTIFY); // | BLECharacteristic::PROPERTY_INDICATE);
     sr5010_chars_ptr[i]->setCallbacks(new MyCallbacks());
   }
   Serial.printf("Created %u characteristics.\n", i);
@@ -417,7 +418,11 @@ int processUpdateSerial(char* strUpdate)
         }
       }
 
-      if(match) Serial.printf("^ %s\n", sr5010_chars_ptr[i]->getValue().c_str());
+      if(match)
+      {
+        Serial.printf("^ %s\n", sr5010_chars_ptr[i]->getValue().c_str());
+        sr5010_chars_ptr[i]->notify();
+      }
       else Serial.println("\nNo Arg match.");
     }
     else Serial.println("\nNo Cmd match.");
