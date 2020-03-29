@@ -36,8 +36,9 @@ const sr5010_property_map sr5010Map[] = {
   {"60ef9a3d-5a67-464a-b7bf-fe1c187828f1", "MU", 2},
   {"c21d2540-fe05-43d7-b929-54b76140e030", "SI", 4},
   {"a6b89a0b-c740-4b82-bba5-df717b4163d5", "SV", 4},
-  //{"0969d2b6-60d8-4a1b-a88c-8457449a453e", "TFHD", 0},
-  {"0969d2b6-60d8-4a1b-a88c-8457449a453e", "TFAN", 0}
+  {"0969d2b6-60d8-4a1b-a88c-8457449a453e", "TFHD", 0},
+  {"0969d2b6-60d8-4a1b-a88c-8457449a453e", "TFAN", 0},
+  {"153acaae-9181-48c5-908c-21e81d3a8f85", "Z2", 2},
 };
 
 //{outgoing argument strings}
@@ -46,7 +47,8 @@ const char sr5010MapArgsOut[][8] = {
   "UP", "DOWN",
   "ON", "OFF",
   "CD", "TV", "TUNER", "HDRADIO",
-  "OFF", "TV", "BD", "V.AUX"
+  "OFF", "TV", "BD", "V.AUX",
+  "ON", "OFF"
 };
 
 #define SR5010_NUMCHARS (sizeof(sr5010Map)/sizeof(sr5010_property_map))
@@ -259,7 +261,7 @@ void UIUpdate(char bitField)
       refreshNeeded = true;
 
       argIndex = 0;
-      if(field != 1) //skip volume field, which is stored as an integer.
+      if(field < 2) //Skip volume and power fields, volume is at index 0 and volume is stored as an integer.
       {
         //find argument string major index
         for(j = 0; j < field; j++)
@@ -292,6 +294,10 @@ void UIUpdate(char bitField)
 
         case 4: //Video source
           M5.Lcd.printf("Video: %s", sr5010MapArgsOut[argIndex]);
+        break;
+
+        case 7: //Zone 2
+          M5.Lcd.printf("Zone2: %s", sr5010MapArgsOut[argIndex]);
         break;
 
         default:
@@ -449,23 +455,12 @@ void loop() {
             Serial.println(txBuf);
             pRemoteCharacteristic->writeValue(txBuf);
           }
-          
-          /*
-          //read remote
-          if(pRemoteCharacteristic->canRead()) {
-            val = pRemoteCharacteristic->readValue();
-            Serial.printf("<- %s\n ", val.c_str());
-            M5.Lcd.printf("<- %s\n", val.c_str());
-            M5.update();
-          }
-          */
         }
       }
 
       while(!digitalRead(39)); 
     }
-    
-    
+
     i = rotary.rotate(); // 0 = not turning, 1 = CW, 2 = CCW
     if(i) //rotary encoder rotation
     {
@@ -497,16 +492,6 @@ void loop() {
             Serial.println(txBuf);
             pRemoteCharacteristic->writeValue(txBuf);
           }
-
-          /*
-          //read remote
-          if(pRemoteCharacteristic->canRead()) {
-            val = pRemoteCharacteristic->readValue();
-            Serial.printf("<- %s\n ", val.c_str());
-            M5.Lcd.printf("<- %s\n", val.c_str());
-            M5.update();
-          }
-          */
         }
       }
     }
@@ -533,16 +518,6 @@ void loop() {
             Serial.println(txBuf);
             pRemoteCharacteristic->writeValue(txBuf);
           }
-
-          /*
-          //read remote
-          if(pRemoteCharacteristic->canRead()) {
-            val = pRemoteCharacteristic->readValue();
-            Serial.printf("<- %s\n ", val.c_str());
-            M5.Lcd.printf("<- %s\n", val.c_str());
-            M5.update();
-          }
-          */
         }
       }
     }
@@ -575,16 +550,6 @@ void loop() {
             Serial.println(txBuf);
             pRemoteCharacteristic->writeValue(txBuf);
           }
-
-          /*
-          //read remote
-          if(pRemoteCharacteristic->canRead()) {
-            val = pRemoteCharacteristic->readValue();
-            Serial.printf("<- %s\n ", val.c_str());
-            M5.Lcd.printf("<- %s\n", val.c_str());
-            M5.update();
-          }
-          */
         }
       }
 
@@ -596,7 +561,6 @@ void loop() {
       time_now = millis();
       sleepTimerExpired = false;
     }
-    
   }
 
   // If the flag "doConnect" is true then we have scanned for and found the desired
