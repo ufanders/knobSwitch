@@ -14,7 +14,6 @@ int keypadPin = 36;
 char keyOld;
 unsigned long time_now, time_now10;
 
-
 char batteryLevel;
 volatile char updateBitfield;
 bool sleepTimerExpired, updateLcd;
@@ -200,8 +199,8 @@ void setup() {
   M5.Lcd.setTextColor(WHITE);
   M5.Lcd.setTextSize(1);
   Serial.println("Started LCD.");
-  M5.Lcd.println("Started LCD.");
-  M5.Lcd.printf("Battery at %u%%.\n", batteryLevel);
+  //M5.Lcd.println("Started LCD.");
+  //M5.Lcd.printf("Battery at %u%%.\n", batteryLevel);
   M5.update();
   
   Serial.begin(115200);
@@ -262,6 +261,7 @@ void setup() {
 }
 
 RTC_DATA_ATTR char UIStatePrevious;
+RTC_DATA_ATTR char UIStateCurrent = 0;
 char keyNew = 0;
 bool keyPressed = false;
 char strTemp[16] = "";
@@ -383,18 +383,24 @@ void loop() {
     Serial2.printf("%s\r", rxBuf1);
   }
 
-  if( i != UIStatePrevious)
+  if(UIStateCurrent != UIStatePrevious)
   {
-    Serial.printf("UISTATEPrevious, i=%d\n", i); //DEBUG
+    Serial.printf("UIStateCurrent=%d\n", UIStateCurrent); //DEBUG
     
     if(sleepTimerExpired)
     {
       //wake up LCD and process UI input.
-      M5.Lcd.wakeup();
-      M5.Lcd.setBrightness(200);
+      //M5.Lcd.wakeup();
       M5.Lcd.fillRect(0, M5.Lcd.height()-21, M5.Lcd.width()-1, 10, BLACK);
       M5.Lcd.setCursor(0, M5.Lcd.height()-21);
+      
+      if(M5.Power.canControl())
+      {
+        batteryLevel = M5.Power.getBatteryLevel();
+      }
+      
       M5.Lcd.printf("Battery at %u%%.\n", batteryLevel);
+      M5.Lcd.setBrightness(200);
       updateLcd = true;
       
       sleepTimerExpired = false;
@@ -402,10 +408,9 @@ void loop() {
     
     time_now10 = millis();
 
-    updateBitfield = 1;
+    UIStatePrevious = UIStateCurrent;
   }
-  UIStatePrevious = i;
-
+  
   if(updateBitfield)
   {
     UIUpdate(updateBitfield);
@@ -423,7 +428,7 @@ void loop() {
     sleepTimerExpired = true;
     Serial.println("Sleeping now.");
     M5.Lcd.setBrightness(0);
-    M5.Lcd.sleep();
+    //M5.Lcd.sleep();
   }
 }
 
@@ -481,6 +486,14 @@ int processUpdateSerial(char* strUpdate)
         sr5010_chars_ptr[i]->notify();
       }
       else Serial.println("\nNo Arg match.");
+
+      if(i < 5)
+      {
+        //trigger UI update.
+        UIStateCurrent++; //Just something to keep registering a difference.
+        updateBitfield |= (1 << i);
+        Serial.printf("updateBitfield = 0x%X\n", updateBitfield);
+      }
     }
     else Serial.println("\nNo Cmd match.");
 
