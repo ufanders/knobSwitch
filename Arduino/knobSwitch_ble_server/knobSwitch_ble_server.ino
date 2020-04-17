@@ -93,16 +93,35 @@ char sr5010_searchByArg(int cmdIndex, char* ptrArg);
 char rxBuf[32], rxBufIdx, rxBufLen;
 char rxBuf1[32], rxBufIdx1, rxBufLen1;
 
+RTC_DATA_ATTR char UIStatePrevious;
+RTC_DATA_ATTR char UIStateCurrent = 0;
+
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
 
 class MyServerCallbacks: public BLEServerCallbacks {
     void onConnect(BLEServer* pServer) {
       deviceConnected = true;
+
+      M5.Lcd.fillRect(0, M5.Lcd.height()-11, M5.Lcd.width()-1, 10, GREEN);
+      M5.Lcd.setCursor(0, M5.Lcd.height()-11);
+      M5.Lcd.setTextColor(BLACK);
+      M5.Lcd.print("Connected");
+      M5.Lcd.setTextColor(WHITE);
+      updateLcd = true;
+      UIStateCurrent++;
     };
 
     void onDisconnect(BLEServer* pServer) {
       deviceConnected = false;
+
+      M5.Lcd.fillRect(0, M5.Lcd.height()-11, M5.Lcd.width()-1, 10, RED);
+      M5.Lcd.setCursor(0, M5.Lcd.height()-11);
+      M5.Lcd.setTextColor(BLACK);
+      M5.Lcd.print("Disconnected");
+      M5.Lcd.setTextColor(WHITE);
+      updateLcd = true;
+      UIStateCurrent++;
     }
 };
 
@@ -214,6 +233,8 @@ void setup() {
   //INFO: https://github.com/nkolban/esp32-snippets/issues/114
   //INFO: https://github.com/espressif/esp-idf/issues/1087
   pService = pServer->createService(BLEUUID(SERVICE_UUID), 10); //SR5010_NUMCHARS);
+  pServer->setCallbacks(new MyServerCallbacks());
+  
   BLECharacteristic *pCharacteristic;
 
   printDeviceAddress();
@@ -260,8 +281,6 @@ void setup() {
   updateLcd = true;
 }
 
-RTC_DATA_ATTR char UIStatePrevious;
-RTC_DATA_ATTR char UIStateCurrent = 0;
 char keyNew = 0;
 bool keyPressed = false;
 char strTemp[16] = "";
