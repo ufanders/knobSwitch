@@ -12,7 +12,18 @@
 
 int keypadPin = 36;
 char keyOld;
-unsigned long time_now = 0;
+unsigned long time_now, time_now10;
+
+
+char batteryLevel;
+volatile char updateBitfield;
+bool sleepTimerExpired, updateLcd;
+
+#define bitPwr (1 << 0)
+#define bitVolume (1 << 1)
+#define bitMute (1 << 2)
+#define bitSrcAudio (1 << 3)
+#define bitSrcVideo (1 << 4)
 
 // See the following for generating UUIDs:
 // https://www.uuidgenerator.net/
@@ -34,8 +45,19 @@ const sr5010_property_map sr5010Map[] = {
   {"60ef9a3d-5a67-464a-b7bf-fe1c187828f1", "MU", 2},
   {"c21d2540-fe05-43d7-b929-54b76140e030", "SI", 4},
   {"a6b89a0b-c740-4b82-bba5-df717b4163d5", "SV", 4},
-  //{"0969d2b6-60d8-4a1b-a88c-8457449a453e", "TFHD", 0},
-  {"0969d2b6-60d8-4a1b-a88c-8457449a453e", "TFAN", 0}
+  {"0969d2b6-60d8-4a1b-a88c-8457449a453e", "TFHD", 0},
+  {"0969d2b6-60d8-4a1b-a88c-8457449a453e", "TFAN", 0},
+  {"153acaae-9181-48c5-908c-21e81d3a8f85", "Z2", 2},
+};
+
+//{outgoing argument strings}
+const char sr5010MapArgsOut[][8] = {
+  "ON", "STANDBY",
+  "UP", "DOWN",
+  "ON", "OFF",
+  "CD", "TV", "TUNER", "HDRADIO",
+  "OFF", "TV", "BD", "V.AUX",
+  "ON", "OFF"
 };
 
 /*
@@ -48,15 +70,6 @@ const char sr5010MapArgsTab[][2] = {
   {4, 2}, {4, 2}, {4, 5}
 };
 */
-
-//{outgoing argument strings}
-const char sr5010MapArgsOut[][8] = {
-  "ON", "STANDBY",
-  "UP", "DOWN",
-  "ON", "OFF",
-  "CD", "TV", "TUNER", "HDRADIO",
-  "OFF", "TV", "BD", "V.AUX"
-};
 
 /*
 //{incoming argument formats}
@@ -79,6 +92,7 @@ char sr5010_searchByCmd(char*);
 char sr5010_searchByArg(int cmdIndex, char* ptrArg);
 
 char rxBuf[32], rxBufIdx, rxBufLen;
+char rxBuf1[32], rxBufIdx1, rxBufLen1;
 
 bool deviceConnected = false;
 bool oldDeviceConnected = false;
@@ -158,6 +172,37 @@ void setup() {
 
   //disable M5Stack speaker clicking noise.
   dacWrite(25,0);
+
+  // initialize the M5Stack object
+  M5.begin();
+  /*
+    Power chip connected to gpio21, gpio22, I2C device
+    Set battery charging voltage and current
+    If used battery, please call this function in your project
+  */
+  M5.Power.begin();
+  M5.Lcd.setBrightness(200);
+  M5.Lcd.setTextWrap(true, true);
+
+  M5.Power.setWakeupButton(BUTTON_A_PIN);
+  if(M5.Power.canControl())
+  {
+    batteryLevel = M5.Power.getBatteryLevel();
+  }
+  else
+  {
+    M5.Lcd.println("PMIC not found.");
+  }
+
+  // text print
+  M5.Lcd.fillScreen(BLACK);
+  M5.Lcd.setCursor(0, 0);
+  M5.Lcd.setTextColor(WHITE);
+  M5.Lcd.setTextSize(1);
+  Serial.println("Started LCD.");
+  M5.Lcd.println("Started LCD.");
+  M5.Lcd.printf("Battery at %u%%.\n", batteryLevel);
+  M5.update();
   
   Serial.begin(115200);
   Serial.println("Starting BLE.");
@@ -211,15 +256,21 @@ void setup() {
   keyOld = 0;
 
   time_now = millis();
+  time_now10 = millis();
+  sleepTimerExpired = false;
+  updateLcd = true;
 }
 
+RTC_DATA_ATTR char UIStatePrevious;
+char keyNew = 0;
+bool keyPressed = false;
+char strTemp[16] = "";
+bool keySuppress = false;
+char i;
+  
 void loop() {
 //=====================================
-  char keyNew = 0;
-  bool keyPressed = false;
-  char strTemp[16] = "";
-  bool keySuppress = false;
-
+  
   //Serial.println("Loop");
 
   if(millis() >= time_now + 100) //every 100ms
@@ -318,7 +369,62 @@ void loop() {
   }
 
   //process any updates coming from the serial port.
-  if(receiveUpdateSerial()) processUpdateSerial(rxBuf);
+  if(receiveUpdateSerial()) 
+  {
+    processUpdateSerial(rxBuf);
+    i++;
+  }
+  
+  //process any updates coming from the console serial port.
+  if(receiveUpdateSerial1()) 
+  {
+    //write to serial port.
+    Serial.printf("-> %s\n", rxBuf1);
+    Serial2.printf("%s\r", rxBuf1);
+  }
+
+  if( i != UIStatePrevious)
+  {
+    Serial.printf("UISTATEPrevious, i=%d\n", i); //DEBUG
+    
+    if(sleepTimerExpired)
+    {
+      //wake up LCD and process UI input.
+      M5.Lcd.wakeup();
+      M5.Lcd.setBrightness(200);
+      M5.Lcd.fillRect(0, M5.Lcd.height()-21, M5.Lcd.width()-1, 10, BLACK);
+      M5.Lcd.setCursor(0, M5.Lcd.height()-21);
+      M5.Lcd.printf("Battery at %u%%.\n", batteryLevel);
+      updateLcd = true;
+      
+      sleepTimerExpired = false;
+    }
+    
+    time_now10 = millis();
+
+    updateBitfield = 1;
+  }
+  UIStatePrevious = i;
+
+  if(updateBitfield)
+  {
+    UIUpdate(updateBitfield);
+    updateBitfield = 0;
+  }
+
+  if(updateLcd)
+  {
+    M5.update();
+    updateLcd = false;
+  }
+
+  if(!sleepTimerExpired && (millis() - time_now10 >= 10000))
+  {
+    sleepTimerExpired = true;
+    Serial.println("Sleeping now.");
+    M5.Lcd.setBrightness(0);
+    M5.Lcd.sleep();
+  }
 }
 
 int processUpdateSerial(char* strUpdate)
@@ -546,4 +652,95 @@ char analogKeypadUpdate(int analogPin)
   retVal = minimumIndex;
   
   return retVal;
+}
+
+void UIUpdate(char bitField)
+{
+  char field, j, argIndex;
+  bool refreshNeeded = false;
+  
+  for(field = 0; field < 5; field++)
+  {
+    if(bitField & (1 << field))
+    {
+      refreshNeeded = true;
+
+      argIndex = 0;
+      if(field != 1) //Skip volume field, volume is stored as an integer.
+      {
+        //find argument string major index
+        for(j = 0; j < field; j++)
+        {
+          argIndex += sr5010Map[j].numArgs;
+        }
+        //argIndex += sr5010MapLocalState[field]; //add argument string minor index
+        argIndex += atoi(sr5010_chars_ptr[field]->getValue().c_str());
+      }
+
+      M5.Lcd.fillRect(0, (10*field), M5.Lcd.width()-1, 10, BLACK);
+      M5.Lcd.setCursor(0, (10*field));
+      
+      switch(field)
+      {
+        case 0: //Power
+          M5.Lcd.printf("Power: %s", sr5010MapArgsOut[argIndex]);
+        break;
+
+        case 1: //Volume (stored as integer, not index)
+          //M5.Lcd.printf("Volume: %d", sr5010MapLocalState[field]);
+          M5.Lcd.printf("Volume: %s",sr5010_chars_ptr[field]->getValue().c_str());
+        break;
+
+        case 2: //Mute
+          M5.Lcd.printf("Mute: %s", sr5010MapArgsOut[argIndex]);
+        break;
+
+        case 3: //Audio source
+          M5.Lcd.printf("Audio: %s", sr5010MapArgsOut[argIndex]);
+        break; 
+
+        case 4: //Video source
+          M5.Lcd.printf("Video: %s", sr5010MapArgsOut[argIndex]);
+        break;
+
+        case 7: //Zone 2
+          M5.Lcd.printf("Zone2: %s", sr5010MapArgsOut[argIndex]);
+        break;
+
+        default:
+        break;
+      }
+    }
+  }
+
+  if(refreshNeeded) 
+  {
+    //M5.update();
+    updateLcd = true;
+  }
+}
+
+int receiveUpdateSerial1(void)
+{
+  char rc;
+
+  //receive any new status update.
+  if(Serial.available())
+  {
+    rxBufIdx1 = 0; rxBufLen1 = 0;
+    
+    //read in characters until we see a CR.
+    while(Serial.available())
+    {
+      rc = Serial.read();
+      if(rc != '\r') rxBuf1[rxBufIdx1++] = rc; 
+      else 
+      {
+        rxBuf1[rxBufIdx1] = '\0'; rxBufLen1 = rxBufIdx1;
+        return rxBufLen1;
+      }
+    }
+  }
+  
+  return 0;
 }
