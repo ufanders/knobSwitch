@@ -32,31 +32,41 @@ bool sleepTimerExpired, updateLcd;
 //NOTE: The STANDBY MODE must be set to NORMAL 
 //instead of ECONOMY for the power function to work correctly.
 
+#define BIT_ISUPDOWN 0b1
+
 struct sr5010_property_map {
-  char uuid[37];
-  char statusStr[9]; //up to 8-character prefix (wtf!)
-  int numArgs;
+char uuid[37];
+  char statusStr[9]; //up to 8-character command with NULL terminator.
+  int numArgs; //number of static string arguments
+  char attributes; //bitfield
 };
 
 const sr5010_property_map sr5010Map[] = {
-  {"bb0dae34-05cb-4290-a8c4-6dad813e82e2", "PW", 2},
-  {"88e1ef43-9804-411d-a1f9-f6cdbda9a9a9", "MV", 2},
-  {"60ef9a3d-5a67-464a-b7bf-fe1c187828f1", "MU", 2},
-  {"c21d2540-fe05-43d7-b929-54b76140e030", "SI", 4},
-  {"a6b89a0b-c740-4b82-bba5-df717b4163d5", "SV", 4},
-  {"0969d2b6-60d8-4a1b-a88c-8457449a453e", "TFHD", 0},
-  {"0969d2b6-60d8-4a1b-a88c-8457449a453e", "TFAN", 0},
-  {"153acaae-9181-48c5-908c-21e81d3a8f85", "Z2", 2},
+  {"bb0dae34-05cb-4290-a8c4-6dad813e82e2", "PW", 2, 0},
+  {"3ac1dc48-4824-4e03-8f5e-9b4a591a94e9", "ZM", 2, 0},
+  {"88e1ef43-9804-411d-a1f9-f6cdbda9a9a9", "MV", 2, 0},
+  {"60ef9a3d-5a67-464a-b7bf-fe1c187828f1", "MU", 2, 0},
+  {"c21d2540-fe05-43d7-b929-54b76140e030", "SI", 14, 0},
+  {"a6b89a0b-c740-4b82-bba5-df717b4163d5", "SV", 10, 0},
+  {"0969d2b6-60d8-4a1b-a88c-8457449a453e", "TFHD", 0, 0},
+  {"e377cf47-0f23-4004-ba4d-1f93c0193fca", "TFAN", 0, 0},
+  {"153acaae-9181-48c5-908c-21e81d3a8f85", "Z2", 2, 0},
+  //==== Increment-only characteristics
+  {"edfc239e-ea86-472b-8d95-0bd9d613b56c", "", 0, BIT_ISUPDOWN}, //MV up/down
+  {"2478b23b-6464-45dd-a0c5-9eb4923fd4aa", "", 0, BIT_ISUPDOWN}, //Z2 up/down
 };
 
 //{outgoing argument strings}
-const char sr5010MapArgsOut[][8] = {
+const char sr5010MapArgsOut[][10] = {
   "ON", "STANDBY",
+  "ON", "OFF", //ZM
   "UP", "DOWN",
   "ON", "OFF",
-  "CD", "TV", "TUNER", "HDRADIO",
-  "OFF", "TV", "BD", "V.AUX",
-  "ON", "OFF"
+  //NOTE: Net/online music/usb/ipod/bluetooth functions return large strings that are custom-terminated.
+    //This is stupid, so we skip them for now.
+  "CD", "DVD", "BD", "TV", "SAT/CBL", "MPLAY", "GAME", "TUNER", /*"IRADIO", "SERVER",*/ "FAVORITES", "AUX1", "AUX2", "INET", "BT", "USB/IPOD", 
+  "DVD", "BD", "TV", "SAT/CBL", "MPLAY", "GAME", "AUX1", "AUX2", "CD", "OFF",
+  "ON", "OFF" //Z2
 };
 
 /*
@@ -90,8 +100,8 @@ char sr5010_searchByUUID(const char*);
 char sr5010_searchByCmd(char*);
 char sr5010_searchByArg(int cmdIndex, char* ptrArg);
 
-char rxBuf[32], rxBufIdx, rxBufLen;
-char rxBuf1[32], rxBufIdx1, rxBufLen1;
+char rxBuf[256], rxBufIdx, rxBufLen;
+char rxBuf1[256], rxBufIdx1, rxBufLen1;
 
 RTC_DATA_ATTR char UIStatePrevious;
 RTC_DATA_ATTR char UIStateCurrent = 0;
@@ -137,26 +147,41 @@ class MyCallbacks: public BLECharacteristicCallbacks {
 
       //fetch command string index using UUID
       char i = 0;
+      const char* pStrOut;
       i = sr5010_searchByUUID(strUUID.c_str());
       //Serial.printf("%u\n",i);
       
       if(i != 0xFF)
       {
         int valNum = atoi(val.c_str()); // get argument index
-  
-        char j = 0;
-        char argIndex = 0;
-  
-        //find argument string major index
-        for(j = 0; j < i; j++)
+        
+        if(sr5010Map[i].attributes & BIT_ISUPDOWN)
         {
-          argIndex += sr5010Map[j].numArgs;
+          const char strUp[] = "UP";
+          const char strDn[] = "DOWN";
+
+          if(valNum == 0) pStrOut = strUp;
+          else pStrOut = strDn;
+    
         }
-        argIndex += valNum; //add argument string minor index
-      
+        else
+        {
+          char j = 0;
+          char argIndex = 0;
+    
+          //find argument string major index
+          for(j = 0; j < i; j++)
+          {
+            argIndex += sr5010Map[j].numArgs;
+          }
+          argIndex += valNum; //add argument string minor index
+
+          pStrOut = sr5010MapArgsOut[argIndex];
+        }
+        
         //write to serial port.
-        Serial.printf("-> %s%s\n", sr5010Map[i].statusStr, sr5010MapArgsOut[argIndex]);
-        Serial2.printf("%s%s\r", sr5010Map[i].statusStr, sr5010MapArgsOut[argIndex]);
+        Serial.printf("-> %s%s\n", sr5010Map[i].statusStr, pStrOut);
+        Serial2.printf("%s%s\r", sr5010Map[i].statusStr, pStrOut);
       }
     };
 };
@@ -185,23 +210,25 @@ BLEServer *pServer;
 BLEService *pService;
 
 void setup() {
-  Serial.setDebugOutput(true);
-  esp_log_level_set("*",ESP_LOG_VERBOSE);
-
-  //disable M5Stack speaker clicking noise.
-  dacWrite(25,0);
+  //Serial.setDebugOutput(true);
+  //esp_log_level_set("*",ESP_LOG_VERBOSE);
 
   // initialize the M5Stack object
-  M5.begin();
+  //NOTE: Something in the M5Stack API makes BLE init unreliable.
+  M5.begin(true, false, false, true);
+  M5.Speaker.end();
   /*
     Power chip connected to gpio21, gpio22, I2C device
     Set battery charging voltage and current
     If used battery, please call this function in your project
   */
   M5.Power.begin();
-  M5.Lcd.setBrightness(200);
+  M5.Lcd.setBrightness(100);
   M5.Lcd.setTextWrap(true, true);
-
+  
+  //disable M5Stack speaker clicking noise.
+  dacWrite(25,0);
+  
   M5.Power.setWakeupButton(BUTTON_A_PIN);
   if(M5.Power.canControl())
   {
@@ -226,14 +253,19 @@ void setup() {
   Serial.println("Starting BLE.");
 
   Serial2.begin(9600, SERIAL_8N1, 16, 17); //pin 16=TXD, pin 17=RXD.
-
+  
+  Serial.println("OK0");
   //INFO: https://github.com/nkolban/esp32-snippets/issues/144
-  BLEDevice::init("SR5010");
+  BLEDevice::init("KSCT");
+  Serial.println("OK1");
   pServer = BLEDevice::createServer();
+  Serial.println("OK2");
   //INFO: https://github.com/nkolban/esp32-snippets/issues/114
   //INFO: https://github.com/espressif/esp-idf/issues/1087
-  pService = pServer->createService(BLEUUID(SERVICE_UUID), 10); //SR5010_NUMCHARS);
+  pService = pServer->createService(BLEUUID(SERVICE_UUID), (1+2*SR5010_NUMCHARS));
+  Serial.println("OK3");
   pServer->setCallbacks(new MyServerCallbacks());
+  Serial.println("OK4");
   
   BLECharacteristic *pCharacteristic;
 
@@ -467,7 +499,7 @@ int processUpdateSerial(char* strUpdate)
   while(ptr != NULL)
   {
     //parse update string and update corresponding characteristic value.
-    char statusStr[16];
+    char statusStr[256];
 
     i = sr5010_searchByCmd(ptr);
 
@@ -562,8 +594,11 @@ char sr5010_searchByCmd(char* ptrCmd)
   
   while(i<SR5010_NUMCHARS && !match)
   {
-    len = strlen(sr5010Map[i].statusStr);
-    c = memcmp(ptrCmd, sr5010Map[i].statusStr, len);
+    if(sr5010Map[i].numArgs > 0)
+    {
+      len = strlen(sr5010Map[i].statusStr);
+      c = memcmp(ptrCmd, sr5010Map[i].statusStr, len);
+    }
     
     if(c == 0) //we found a match.
     {
@@ -686,26 +721,28 @@ char analogKeypadUpdate(int analogPin)
   return retVal;
 }
 
+
 void UIUpdate(char bitField)
 {
   char field, j, argIndex;
   bool refreshNeeded = false;
+  #define NUM_FIELDS 5
+  char cmdIndices[NUM_FIELDS] = {0, 2, 3, 4, 5};
   
-  for(field = 0; field < 5; field++)
+  for(field = 0; field < NUM_FIELDS; field++)
   {
     if(bitField & (1 << field))
     {
       refreshNeeded = true;
 
       argIndex = 0;
-      if(field != 1) //Skip volume field, volume is stored as an integer.
+      if(field != 2) //Skip volume field, volume is stored as an integer.
       {
         //find argument string major index
-        for(j = 0; j < field; j++)
+        for(j = 0; j < cmdIndices[field]; j++)
         {
           argIndex += sr5010Map[j].numArgs;
         }
-        //argIndex += sr5010MapLocalState[field]; //add argument string minor index
         argIndex += atoi(sr5010_chars_ptr[field]->getValue().c_str());
       }
 
@@ -719,7 +756,6 @@ void UIUpdate(char bitField)
         break;
 
         case 1: //Volume (stored as integer, not index)
-          //M5.Lcd.printf("Volume: %d", sr5010MapLocalState[field]);
           M5.Lcd.printf("Volume: %s",sr5010_chars_ptr[field]->getValue().c_str());
         break;
 
@@ -747,7 +783,6 @@ void UIUpdate(char bitField)
 
   if(refreshNeeded) 
   {
-    //M5.update();
     updateLcd = true;
   }
 }
