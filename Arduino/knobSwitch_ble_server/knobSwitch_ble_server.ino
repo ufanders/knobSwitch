@@ -566,8 +566,7 @@ int processUpdateSerial(char* strUpdate)
         if(j != 0xFF)
         {
           //if a match is found, insert the arg string index as characteristic value.
-          //itoa(j, statusStr, 10);
-          sprintf(statusStr, "%d", j);
+          sprintf(statusStr, "%d\n", j);
           sr5010_chars_ptr[i]->setValue(statusStr);
           match = 1;
         }
