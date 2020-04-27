@@ -11,10 +11,14 @@ const byte SX1509_ADDRESS = 0x3E;  // SX1509 I2C address
 SX1509 io; // Create an SX1509 object to be used throughout
 
 unsigned long time_now = 0;
+unsigned long time_now2 = 0;
 char batteryLevel, retries;
 volatile char updateBitfield;
 bool sleepTimerExpired, updateLcd;
 volatile bool updateAll;
+
+// Pin A, Pin B, Button Pin
+SimpleRotary rotary(2,5,36);
 
 #define bitPwr (1 << 0)
 #define bitVolume (1 << 1)
@@ -22,59 +26,7 @@ volatile bool updateAll;
 #define bitSrcAudio (1 << 3)
 #define bitSrcVideo (1 << 4)
 
-// Pin A, Pin B, Button Pin
-SimpleRotary rotary(2,5,17);
-
-// See the following for generating UUIDs:
-// https://www.uuidgenerator.net/
-
-#define SERVICE_UUID "18550d7d-d1aa-4968-a563-e8ebeb4840ea"
-
-//NOTE: The STANDBY MODE must be set to NORMAL 
-//instead of ECONOMY for the power function to work correctly.
-
-#define BIT_ISUPDOWN 0b1
-
-struct sr5010_property_map {
-  char uuid[37];
-  char statusStr[9]; //up to 8-character prefix (wtf!)
-  int numArgs;
-  char attributes; //bitfield
-};
-
-//we want to keep this info in flash, not in RAM.
-const sr5010_property_map sr5010Map[] = {
-  {"bb0dae34-05cb-4290-a8c4-6dad813e82e2", "PW", 2, 0},
-  {"3ac1dc48-4824-4e03-8f5e-9b4a591a94e9", "ZM", 2, 0},
-  {"88e1ef43-9804-411d-a1f9-f6cdbda9a9a9", "MV", 2, 0},
-  {"60ef9a3d-5a67-464a-b7bf-fe1c187828f1", "MU", 2, 0},
-  {"c21d2540-fe05-43d7-b929-54b76140e030", "SI", 13, 0},
-  {"a6b89a0b-c740-4b82-bba5-df717b4163d5", "SV", 10, 0},
-  {"0969d2b6-60d8-4a1b-a88c-8457449a453e", "TFHD", 0, 0},
-  {"e377cf47-0f23-4004-ba4d-1f93c0193fca", "TFAN", 0, 0},
-  {"153acaae-9181-48c5-908c-21e81d3a8f85", "Z2", 2, 0},
-  //==== Increment-only characteristics
-  {"edfc239e-ea86-472b-8d95-0bd9d613b56c", "MV", 0, BIT_ISUPDOWN}, //MV up/down
-  {"2478b23b-6464-45dd-a0c5-9eb4923fd4aa", "Z2", 0, BIT_ISUPDOWN}, //Z2 up/down
-};
-
-//{outgoing argument strings}
-const char sr5010MapArgsOut[][10] = {
-  "ON", "STANDBY",
-  "ON", "OFF", //ZM
-  "UP", "DOWN",
-  "ON", "OFF",
-  //NOTE: Net/online music/usb/ipod/bluetooth functions return large strings that are custom-terminated.
-    //This is stupid, so we skip them for now.
-  "CD", "DVD", "BD", "TV", "SAT/CBL", "MPLAY", "GAME", "TUNER", /*"IRADIO", "SERVER", "FAVORITES",*/ "AUX1", "AUX2", /*"INET",*/ "BT", "USB/IPOD", 
-  "DVD", "BD", "TV", "SAT/CBL", "MPLAY", "GAME", "AUX1", "AUX2", "CD", "OFF",
-  "ON", "OFF" //Z2
-};
-
-#define SR5010_NUMCHARS (sizeof(sr5010Map)/sizeof(sr5010_property_map))
-
-char sr5010_searchByUUID(const char*);
-char sr5010_searchByCmd(char*);
+#include "knobSwitch.h"
 
 //keeps track of all local control states.
 int sr5010MapLocalState[SR5010_NUMCHARS];
@@ -320,7 +272,7 @@ char sr5010_searchByUUID(const char* ptrUUID)
 
 void UIUpdate(char bitField)
 {
-  char field, j, argIndex;
+  char field, j, argIndex, i;
   bool refreshNeeded = false;
   #define NUM_FIELDS 5
   char cmdIndices[NUM_FIELDS] = {0, 2, 3, 4, 5};
@@ -345,7 +297,7 @@ void UIUpdate(char bitField)
 
       M5.Lcd.fillRect(0, (10*field), M5.Lcd.width()-1, 10, BLACK);
       M5.Lcd.setCursor(0, (10*field));
-      
+
       switch(field)
       {
         case 0: //Power
@@ -362,6 +314,48 @@ void UIUpdate(char bitField)
 
         case 3: //Audio source
           M5.Lcd.printf("Audio: %s", sr5010MapArgsOut[argIndex]);
+          
+          for(i=4; i<8; i++)
+          {
+            //clear LED indicators.
+            io.analogWrite(i, 0);
+            io.analogWrite(i+8, 0);
+          }
+          
+          switch(sr5010MapLocalState[cmdIndices[field]]) //set indicator.
+          {
+            case 0: //CD
+              io.analogWrite(4, 255);
+            break;
+            
+            case 2: //BD
+              io.analogWrite(5, 255);
+            break;
+
+            case 3: //TV
+              io.analogWrite(6, 255);
+            break;
+
+            case 5: //MPLAY
+              io.analogWrite(7, 255);
+            break;
+            
+            case 6: //GAME
+              io.analogWrite(12, 255);
+            break;
+
+            case 7: //TUNER
+              io.analogWrite(13, 255);
+            break;
+
+            case 8: //AUX1
+              io.analogWrite(14, 255);
+            break;
+
+            default:
+            break;
+            
+          }
         break; 
 
         case 4: //Video source
@@ -454,6 +448,15 @@ void setup() {
   {
     //io.keypad(KEY_ROWS, KEY_COLS, sleepTime, scanTime, debounceTime);
     io.keypad(4, 4, 256, 32, 16);
+    io.pinMode(4, ANALOG_OUTPUT);
+    io.pinMode(5, ANALOG_OUTPUT);
+    io.pinMode(6, ANALOG_OUTPUT);
+    io.pinMode(7, ANALOG_OUTPUT);
+    io.pinMode(12, ANALOG_OUTPUT);
+    io.pinMode(13, ANALOG_OUTPUT);
+    io.pinMode(14, ANALOG_OUTPUT);
+    io.pinMode(15, ANALOG_OUTPUT);
+    pinMode(36, INPUT_PULLUP); //SX1509 INT*
   }
   else Serial.println("SX1509 not found");
 
@@ -484,20 +487,29 @@ RTC_DATA_ATTR char UIStatePrevious;
 
 // This is the Arduino main loop function.
 void loop() {
-
-  //get all button input states at once.
+  
   char i;
-  i = rotary.rotate() | rotary.push() << 2 | (digitalRead(39) << 3) | \
-  (digitalRead(38) << 4) | (digitalRead(37) << 5);
 
-  unsigned int keyData = io.readKeypad();
-
-  if (keyData != 0) // If a key was pressed:
+  if(millis() >= time_now2 + 100) //every 100ms
   {
-    byte row = io.getRow(keyData);
-    byte col = io.getCol(keyData);
+    //get all button input states at once.
+    
+    i = rotary.rotate() | rotary.push() << 2 | (digitalRead(39) << 3) | \
+    (digitalRead(38) << 4) | (digitalRead(37) << 5);
+  
+    if(!digitalRead(35))
+    {
+      unsigned int keyData = io.readKeypad();
+    
+      if (keyData != 0) // If a key was pressed:
+      {
+        byte row = io.getRow(keyData);
+        byte col = io.getCol(keyData);
+        Serial.printf("Key (%d, %d)\n", row, col);
+      }
+    }
 
-    Serial.printf("Key (%d, %d)\n", row, col);
+    time_now2 = millis();
   }
 
   if( i != UIStatePrevious)
