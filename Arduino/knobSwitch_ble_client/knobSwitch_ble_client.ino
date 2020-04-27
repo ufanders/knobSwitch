@@ -4,6 +4,11 @@
 #include <M5Stack.h>
 #include <string.h>
 #include <AnalogKeypad.h>
+#include <Wire.h> // Include the I2C library
+#include <SparkFunSX1509.h>
+
+const byte SX1509_ADDRESS = 0x3E;  // SX1509 I2C address
+SX1509 io; // Create an SX1509 object to be used throughout
 
 unsigned long time_now = 0;
 char batteryLevel, retries;
@@ -61,7 +66,7 @@ const char sr5010MapArgsOut[][10] = {
   "ON", "OFF",
   //NOTE: Net/online music/usb/ipod/bluetooth functions return large strings that are custom-terminated.
     //This is stupid, so we skip them for now.
-  "CD", "DVD", "BD", "TV", "SAT/CBL", "MPLAY", "GAME", "TUNER", /*"IRADIO", "SERVER", "FAVORITES",*/ "AUX1", "AUX2", "INET", "BT", "USB/IPOD", 
+  "CD", "DVD", "BD", "TV", "SAT/CBL", "MPLAY", "GAME", "TUNER", /*"IRADIO", "SERVER", "FAVORITES",*/ "AUX1", "AUX2", /*"INET",*/ "BT", "USB/IPOD", 
   "DVD", "BD", "TV", "SAT/CBL", "MPLAY", "GAME", "AUX1", "AUX2", "CD", "OFF",
   "ON", "OFF" //Z2
 };
@@ -445,6 +450,13 @@ void setup() {
 
   updateAll = true; //pull all remote characteristics at connection time.
 
+  if (io.begin(SX1509_ADDRESS))
+  {
+    //io.keypad(KEY_ROWS, KEY_COLS, sleepTime, scanTime, debounceTime);
+    io.keypad(4, 4, 256, 32, 16);
+  }
+  else Serial.println("SX1509 not found");
+
   /*
   // Retrieve a Scanner and set the callback we want to use to be informed when we
   // have detected a new device.  Specify that we want active scanning and start the
@@ -477,6 +489,16 @@ void loop() {
   char i;
   i = rotary.rotate() | rotary.push() << 2 | (digitalRead(39) << 3) | \
   (digitalRead(38) << 4) | (digitalRead(37) << 5);
+
+  unsigned int keyData = io.readKeypad();
+
+  if (keyData != 0) // If a key was pressed:
+  {
+    byte row = io.getRow(keyData);
+    byte col = io.getCol(keyData);
+
+    Serial.printf("Key (%d, %d)\n", row, col);
+  }
 
   if( i != UIStatePrevious)
   {
