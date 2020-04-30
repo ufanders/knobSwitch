@@ -1,14 +1,26 @@
 #include "BLEDevice.h"
 #include "BLEScan.h"
-#include <SimpleRotary.h>
-#include <M5Stack.h>
 #include <string.h>
+#include <M5Stack.h>
 #include <AnalogKeypad.h>
-#include <Wire.h> // Include the I2C library
-#include <SparkFunSX1509.h>
+#include <Wire.h> //I2C library
 
-const byte SX1509_ADDRESS = 0x3E;  // SX1509 I2C address
-SX1509 io; // Create an SX1509 object to be used throughout
+// SX1509 I2C I/O expander
+#include <SparkFunSX1509.h>
+const byte SX1509_ADDRESS = 0x3E;
+SX1509 io;
+
+//Rotary encoder
+#include <SimpleRotary.h>
+SimpleRotary rotary(2,5,36); // Pin A, Pin B, Button Pin
+
+#include "knobSwitch.h"
+
+#define bitPwr (1 << 0)
+#define bitVolume (1 << 1)
+#define bitMute (1 << 2)
+#define bitSrcAudio (1 << 3)
+#define bitSrcVideo (1 << 4)
 
 unsigned long time_now = 0;
 unsigned long time_now2 = 0;
@@ -17,16 +29,23 @@ volatile char updateBitfield;
 bool sleepTimerExpired, updateLcd;
 volatile bool updateAll;
 
-// Pin A, Pin B, Button Pin
-SimpleRotary rotary(2,5,36);
+struct avPreset
+{
+  //-1 indicates no change to the source.
+  signed char audioSrc;
+  signed char videoSrc;
+};
 
-#define bitPwr (1 << 0)
-#define bitVolume (1 << 1)
-#define bitMute (1 << 2)
-#define bitSrcAudio (1 << 3)
-#define bitSrcVideo (1 << 4)
+int sendPreset(byte, byte);
 
-#include "knobSwitch.h"
+const avPreset avPresets[16] = {
+  //Video source buttons
+  {-1, 2}, /*TV only*/ {-1, 4}, /*MPLAY only*/ {-1, 5}, /*GAME only*/ {-1, 6}, /*AUX1 only*/ 
+  {-1, 1}, /*BD only*/ {-1, 0}, /*DVD only*/ {-1, 3}, /*SAT/CBL only*/ {-1, 2}, /*TV only*/ 
+  //Audio source buttons
+  {7, -1}, /*Tuner only*/ {0, -1}, /*CD only*/ {3, -1}, /*TV only*/ {5, -1}, /*MPLAY only*/ 
+  {6, -1}, /*GAME only*/ {2, -1}, /*BD only*/ {8, -1}, /*AUX1 only*/ {1, -1} /*DVD only*/ 
+};
 
 //keeps track of all local control states.
 int sr5010MapLocalState[SR5010_NUMCHARS];
@@ -380,6 +399,60 @@ void UIUpdate(char bitField)
   }
 }
 
+int sendPreset(byte row, byte col)
+{
+  char strOut[8];
+  BLERemoteCharacteristic* pRemoteCharacteristic;
+  
+  if(pRemoteService != nullptr)
+  {
+    int indexBase = (row*4) + col;
+    
+    if(avPresets[indexBase].audioSrc != -1)
+    {
+      //Poke SI
+      pRemoteCharacteristic = pRemoteService->getCharacteristic(sr5010Map[4].uuid);
+      if (pRemoteCharacteristic != nullptr)
+      {
+        Serial.printf("-> %s: ", sr5010Map[4].uuid);
+        
+        //Write value to remote characteristic.
+        if(pRemoteCharacteristic->canWrite()) 
+        {
+          sprintf(strOut, "%d\0", avPresets[indexBase].audioSrc);
+          pRemoteCharacteristic->writeValue(strOut);
+          Serial.println(strOut);
+        }
+        else return 3;
+      }
+      else return 2;
+    }
+
+    if(avPresets[indexBase].videoSrc != -1)
+    {
+      //Poke SV
+      pRemoteCharacteristic = pRemoteService->getCharacteristic(sr5010Map[5].uuid);
+      if (pRemoteCharacteristic != nullptr)
+      {
+        Serial.printf("-> %s: ", sr5010Map[5].uuid);
+        
+        //Write value to remote characteristic.
+        if(pRemoteCharacteristic->canWrite()) 
+        {
+          sprintf(strOut, "%d\0", avPresets[indexBase].videoSrc);
+          pRemoteCharacteristic->writeValue(strOut);
+          Serial.println(strOut);
+        }
+        else return 3;
+      }
+      else return 2;
+    }
+  }
+  else return 1;
+  
+  return 0;
+}
+
 void setup() {
 
   int i = 0;
@@ -460,6 +533,7 @@ void setup() {
   }
   else Serial.println("SX1509 not found");
 
+
   /*
   // Retrieve a Scanner and set the callback we want to use to be informed when we
   // have detected a new device.  Specify that we want active scanning and start the
@@ -489,50 +563,52 @@ RTC_DATA_ATTR char UIStatePrevious;
 void loop() {
   
   char i;
-
-  if(millis() >= time_now2 + 100) //every 100ms
-  {
-    //get all button input states at once.
-    
-    i = rotary.rotate() | rotary.push() << 2 | (digitalRead(39) << 3) | \
-    (digitalRead(38) << 4) | (digitalRead(37) << 5);
-  
-    if(!digitalRead(35))
-    {
-      unsigned int keyData = io.readKeypad();
-    
-      if (keyData != 0) // If a key was pressed:
-      {
-        byte row = io.getRow(keyData);
-        byte col = io.getCol(keyData);
-        Serial.printf("Key (%d, %d)\n", row, col);
-      }
-    }
-
-    time_now2 = millis();
-  }
-
-  if( i != UIStatePrevious)
-  {
-    if(sleepTimerExpired)
-    {
-      //wake up LCD, reconnect to BLE server and process UI input.
-      //M5.Lcd.wakeup();
-      M5.Lcd.setBrightness(200);
-      M5.Lcd.fillRect(0, M5.Lcd.height()-21, M5.Lcd.width()-1, 10, BLACK);
-      M5.Lcd.setCursor(0, M5.Lcd.height()-21);
-      M5.Lcd.printf("Battery at %u%%.\n", batteryLevel);
-      updateLcd = true;
-      
-      sleepTimerExpired = false;
-    }
-    
-    time_now = millis();
-  }
-  UIStatePrevious = i;
-
   if(connected)
   {
+    
+    if(millis() >= time_now2 + 100) //every 100ms
+    {
+      //get all button input states at once.
+      
+      i = rotary.rotate() | rotary.push() << 2 | (digitalRead(39) << 3) | \
+      (digitalRead(38) << 4) | (digitalRead(37) << 5);
+    
+      if(!digitalRead(35))
+      {
+        unsigned int keyData = io.readKeypad();
+      
+        if (keyData != 0) // If a key was pressed:
+        {
+          byte row = io.getRow(keyData);
+          byte col = io.getCol(keyData);
+          Serial.printf("Key (%d, %d)\n", row, col);
+          keyData = sendPreset(row, col);
+          if(keyData) Serial.printf("sendPreset() = %d\n", keyData);
+        }
+      }
+  
+      time_now2 = millis();
+    }
+  
+    if( i != UIStatePrevious)
+    {
+      if(sleepTimerExpired)
+      {
+        //wake up LCD, reconnect to BLE server and process UI input.
+        //M5.Lcd.wakeup();
+        M5.Lcd.setBrightness(200);
+        M5.Lcd.fillRect(0, M5.Lcd.height()-21, M5.Lcd.width()-1, 10, BLACK);
+        M5.Lcd.setCursor(0, M5.Lcd.height()-21);
+        M5.Lcd.printf("Battery at %u%%.\n", batteryLevel);
+        updateLcd = true;
+        
+        sleepTimerExpired = false;
+      }
+      
+      time_now = millis();
+    }
+    UIStatePrevious = i;
+
     //poke remote characteristics per the control being operated.
     char c;
     char txBuf[16];
