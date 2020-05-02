@@ -576,8 +576,8 @@ void loop() {
     {
       //get all button input states at once.
       
-      i = rotary.rotate() | rotary.push() << 2 | (digitalRead(39) << 3) | \
-      (digitalRead(38) << 4) | (digitalRead(37) << 5) ;
+      i = rotary.rotate() | rotary.push() << 2 | (~digitalRead(39) << 3) | \
+      (~digitalRead(38) << 4) | (~digitalRead(37) << 5) ;
     
       if(!digitalRead(35))
       {
@@ -624,30 +624,12 @@ void loop() {
 
     BLERemoteCharacteristic* pRemoteCharacteristic;
 
-    i = digitalRead(39);
-    if(!i) //button A
+    if(!digitalRead(39)) //button A
     {
       sr5010MapLocalState[1] ^= 1; //toggle power state.
       
       //Poke ZM.
-      if(pRemoteService != nullptr)
-      {
-        pRemoteCharacteristic = pRemoteService->getCharacteristic(sr5010Map[1].uuid);
-        if (pRemoteCharacteristic == nullptr) {
-          Serial.println("Can't find characteristic.");
-        }
-        else
-        {
-          Serial.printf("-> %s: ", sr5010Map[1].uuid);
-      
-          //Write value to remote characteristic.
-          if(pRemoteCharacteristic->canWrite()) {
-            sprintf(txBuf, "%d", sr5010MapLocalState[1]);
-            Serial.println(txBuf);
-            pRemoteCharacteristic->writeValue(txBuf);
-          }
-        }
-      }
+      sr5010PokeState(1, sr5010MapLocalState[1]);
 
       while(!digitalRead(39)); 
     }
@@ -655,36 +637,8 @@ void loop() {
     i = rotary.rotate(); // 0 = not turning, 1 = CW, 2 = CCW
     if(i) //rotary encoder rotation
     {
-      if (i == 1)
-      {
-        //Serial.println("CW");
-        c = '0'; //volume up.
-      }
-      else
-      {
-        //Serial.println("CCW");
-        c = '1'; //volume down.
-      }
-
       //Poke MV up/down.
-      if(pRemoteService != nullptr)
-      {
-        Serial.printf("-> %s: ", sr5010Map[9].uuid);
-        
-        pRemoteCharacteristic = pRemoteService->getCharacteristic(sr5010Map[9].uuid);
-        if (pRemoteCharacteristic == nullptr) {
-          Serial.println("Can't find characteristic.");
-        }
-        else
-        {
-          //Write value to remote characteristic.
-          if(pRemoteCharacteristic->canWrite()) {
-            sprintf(txBuf, "%c", c);
-            Serial.println(txBuf);
-            pRemoteCharacteristic->writeValue(txBuf);
-          }
-        }
-      }
+      sr5010PokeState(9, (i-1));
     }
 
     if(rotary.push()) //rotary encoder button.
@@ -692,28 +646,10 @@ void loop() {
       sr5010MapLocalState[3] ^= 1; //toggle mute state.
       
       //Poke MU.
-      if(pRemoteService != nullptr)
-      {
-        Serial.printf("-> %s: ", sr5010Map[3].uuid);
-        
-        pRemoteCharacteristic = pRemoteService->getCharacteristic(sr5010Map[3].uuid);
-        if (pRemoteCharacteristic == nullptr) {
-          Serial.println("Can't find characteristic.");
-        }
-        else
-        {
-          //Write value to remote characteristic.
-          if(pRemoteCharacteristic->canWrite()) {
-            sprintf(txBuf, "%d", sr5010MapLocalState[3]);
-            Serial.println(txBuf);
-            pRemoteCharacteristic->writeValue(txBuf);
-          }
-        }
-      }
+      sr5010PokeState(3, sr5010MapLocalState[3]);
     }
 
-    i = digitalRead(38);
-    if(!i) //button B
+    if(!digitalRead(38)) //button B
     {
       time_now = millis();
       sleepTimerExpired = false;
@@ -724,30 +660,12 @@ void loop() {
       c = '0' + sr5010MapLocalState[4];
       
       //Poke SI
-      if(pRemoteService != nullptr)
-      {
-        Serial.printf("-> %s: ", sr5010Map[4].uuid);
-        
-        pRemoteCharacteristic = pRemoteService->getCharacteristic(sr5010Map[4].uuid);
-        if (pRemoteCharacteristic == nullptr) {
-          Serial.println("Can't find characteristic.");
-        }
-        else
-        {
-          //Write value to remote characteristic.
-          if(pRemoteCharacteristic->canWrite()) {
-            sprintf(txBuf, "%d", sr5010MapLocalState[4]);
-            Serial.println(txBuf);
-            pRemoteCharacteristic->writeValue(txBuf);
-          }
-        }
-      }
+      sr5010PokeState(4, sr5010MapLocalState[4]);
 
       while(!digitalRead(38)); 
     }
 
-    i = digitalRead(37);
-    if(!i) //button C
+    if(!digitalRead(37)) //button C
     {
       time_now = millis();
       sleepTimerExpired = false;
@@ -755,27 +673,8 @@ void loop() {
       sr5010MapLocalState[5]++; //increment video input state.
       if(sr5010MapLocalState[5] >= sr5010Map[5].numArgs) sr5010MapLocalState[5] = 0;
       
-      c = '0' + sr5010MapLocalState[5];
-      
       //Poke SV
-      if(pRemoteService != nullptr)
-      {
-        Serial.printf("-> %s: ", sr5010Map[5].uuid);
-        
-        pRemoteCharacteristic = pRemoteService->getCharacteristic(sr5010Map[5].uuid);
-        if (pRemoteCharacteristic == nullptr) {
-          Serial.println("Can't find characteristic.");
-        }
-        else
-        {
-          //Write value to remote characteristic.
-          if(pRemoteCharacteristic->canWrite()) {
-            sprintf(txBuf, "%d", sr5010MapLocalState[5]);
-            Serial.println(txBuf);
-            pRemoteCharacteristic->writeValue(txBuf);
-          }
-        }
-      }
+      sr5010PokeState(5, sr5010MapLocalState[5]);
 
       while(!digitalRead(37)); 
     }
