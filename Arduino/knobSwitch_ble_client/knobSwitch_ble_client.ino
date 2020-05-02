@@ -37,6 +37,8 @@ struct avPreset
 };
 
 int sendPreset(byte, byte);
+int sr5010MapLocalStateGetText(char, bool, char*);
+int sr5010PokeState(char, int);
 
 const avPreset avPresets[16] = {
   //Video source buttons
@@ -291,8 +293,7 @@ char sr5010_searchByUUID(const char* ptrUUID)
 
 void UIUpdate(char bitField)
 {
-  char field, j, argIndex, i;
-  bool refreshNeeded = false;
+  char field, j, i, strOut[16];
   #define NUM_FIELDS 5
   char cmdIndices[NUM_FIELDS] = {0, 2, 3, 4, 5};
   
@@ -300,39 +301,29 @@ void UIUpdate(char bitField)
   {
     if(bitField & (1 << field))
     {
-      refreshNeeded = true;
-
-      argIndex = 0;
-      if(cmdIndices[field] != 2) //Skip volume field, volume is stored as an integer.
-      {
-        //find argument string major index
-        for(j = 0; j < cmdIndices[field]; j++)
-        {
-          argIndex += sr5010Map[j].numArgs;
-        }
-        argIndex += sr5010MapLocalState[cmdIndices[field]]; //add argument string minor index
-      }
-      Serial.printf("argIndex=%d\n", argIndex);
-
       M5.Lcd.fillRect(0, (10*field), M5.Lcd.width()-1, 10, BLACK);
       M5.Lcd.setCursor(0, (10*field));
 
       switch(field)
       {
         case 0: //Power
-          M5.Lcd.printf("Power: %s", sr5010MapArgsOut[argIndex]);
+          sr5010MapLocalStateGetText(cmdIndices[field], false, strOut);
+          M5.Lcd.printf("Power: %s", strOut);
         break;
 
-        case 1: //Volume (stored as integer, not index)
-          M5.Lcd.printf("Volume: %d", sr5010MapLocalState[cmdIndices[field]]);
+        case 1: //Volume (stored as integer, not arg string index)
+          sr5010MapLocalStateGetText(cmdIndices[field], true, strOut);
+          M5.Lcd.printf("Volume: %s", strOut);
         break;
 
         case 2: //Mute
-          M5.Lcd.printf("Mute: %s", sr5010MapArgsOut[argIndex]);
+          sr5010MapLocalStateGetText(cmdIndices[field], false, strOut);
+          M5.Lcd.printf("Mute: %s", strOut);
         break;
 
         case 3: //Audio source
-          M5.Lcd.printf("Audio: %s", sr5010MapArgsOut[argIndex]);
+          sr5010MapLocalStateGetText(cmdIndices[field], false, strOut);
+          M5.Lcd.printf("Audio: %s", strOut);
           
           for(i=4; i<8; i++)
           {
@@ -378,12 +369,14 @@ void UIUpdate(char bitField)
         break; 
 
         case 4: //Video source
-          M5.Lcd.printf("Video: %s", sr5010MapArgsOut[argIndex]);
+          sr5010MapLocalStateGetText(cmdIndices[field], false, strOut);
+          M5.Lcd.printf("Video: %s", strOut);
         break;
 
         /*
         case 7: //Zone 2
-          M5.Lcd.printf("Zone2: %s", sr5010MapArgsOut[argIndex]);
+          sr5010MapLocalStateGetText(cmdIndices[field], false, strOut);
+          M5.Lcd.printf("Zone2: %s", strOut);
         break;
         */
 
@@ -391,11 +384,6 @@ void UIUpdate(char bitField)
         break;
       }
     }
-  }
-
-  if(refreshNeeded) 
-  {
-    updateLcd = true;
   }
 }
 
@@ -450,6 +438,59 @@ int sendPreset(byte row, byte col)
   }
   else return 1;
   
+  return 0;
+}
+
+int sr5010MapLocalStateGetText(char charIndex, bool isInteger, char* pStrOut)
+{
+  char argIndex = 0;
+  
+  if(pStrOut == nullptr) return 1;
+  
+  if(!isInteger)
+  {
+    //find argument string major index
+    for(char i = 0; i < charIndex; i++)
+    {
+      argIndex += sr5010Map[i].numArgs; //get characteristic argument list offset
+    }
+    argIndex += sr5010MapLocalState[charIndex]; //add characteristic value to index
+  
+    strcpy(pStrOut, sr5010MapArgsOut[argIndex]);
+  }
+  else
+  {
+    sprintf(pStrOut, "%d\0", sr5010MapLocalState[charIndex]);  
+  }
+
+  return 0;
+}
+
+int sr5010PokeState(char stateIndex, int stateValue)
+{
+  char strOut[9];
+  BLERemoteCharacteristic* pRemoteCharacteristic;
+
+  if(pRemoteService != nullptr)
+  {
+    //Poke remote characteristic
+    pRemoteCharacteristic = pRemoteService->getCharacteristic(sr5010Map[stateIndex].uuid);
+    if (pRemoteCharacteristic != nullptr)
+    {
+      Serial.printf("-> %s: ", sr5010Map[stateIndex].uuid);
+        
+      //Write value to remote characteristic.
+      if(pRemoteCharacteristic->canWrite()) 
+      {
+        sprintf(strOut, "%d\0", stateValue);
+        pRemoteCharacteristic->writeValue(strOut);
+        Serial.println(strOut);
+      }
+      else return 2;
+    }
+    else return 1;
+  }
+
   return 0;
 }
 
@@ -571,7 +612,7 @@ void loop() {
       //get all button input states at once.
       
       i = rotary.rotate() | rotary.push() << 2 | (digitalRead(39) << 3) | \
-      (digitalRead(38) << 4) | (digitalRead(37) << 5);
+      (digitalRead(38) << 4) | (digitalRead(37) << 5) ;
     
       if(!digitalRead(35))
       {
@@ -584,6 +625,8 @@ void loop() {
           Serial.printf("Key (%d, %d)\n", row, col);
           keyData = sendPreset(row, col);
           if(keyData) Serial.printf("sendPreset() = %d\n", keyData);
+
+          i |= (1 << 6);
         }
       }
   
@@ -802,7 +845,7 @@ void loop() {
   }
   
   if(doScan){
-    BLEDevice::getScan()->start(0);  // this is just eample to start scan after disconnect, most likely there is better way to do it in arduino
+    BLEDevice::getScan()->start(0);  // this is just example to start scan after disconnect, most likely there is better way to do it in arduino
   }
 
   if(!sleepTimerExpired && (millis() - time_now >= 10000))
@@ -817,6 +860,7 @@ void loop() {
   {
     UIUpdate(updateBitfield);
     updateBitfield = 0;
+    updateLcd = true;
   }
 
   if(updateLcd)
