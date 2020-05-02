@@ -389,54 +389,19 @@ void UIUpdate(char bitField)
 
 int sendPreset(byte row, byte col)
 {
-  char strOut[8];
-  BLERemoteCharacteristic* pRemoteCharacteristic;
-  
-  if(pRemoteService != nullptr)
-  {
     int indexBase = (row*4) + col;
     
     if(avPresets[indexBase].audioSrc != -1)
     {
       //Poke SI
-      pRemoteCharacteristic = pRemoteService->getCharacteristic(sr5010Map[4].uuid);
-      if (pRemoteCharacteristic != nullptr)
-      {
-        Serial.printf("-> %s: ", sr5010Map[4].uuid);
-        
-        //Write value to remote characteristic.
-        if(pRemoteCharacteristic->canWrite()) 
-        {
-          sprintf(strOut, "%d\0", avPresets[indexBase].audioSrc);
-          pRemoteCharacteristic->writeValue(strOut);
-          Serial.println(strOut);
-        }
-        else return 3;
-      }
-      else return 2;
+      sr5010PokeState(4, avPresets[indexBase].audioSrc);
     }
 
     if(avPresets[indexBase].videoSrc != -1)
     {
       //Poke SV
-      pRemoteCharacteristic = pRemoteService->getCharacteristic(sr5010Map[5].uuid);
-      if (pRemoteCharacteristic != nullptr)
-      {
-        Serial.printf("-> %s: ", sr5010Map[5].uuid);
-        
-        //Write value to remote characteristic.
-        if(pRemoteCharacteristic->canWrite()) 
-        {
-          sprintf(strOut, "%d\0", avPresets[indexBase].videoSrc);
-          pRemoteCharacteristic->writeValue(strOut);
-          Serial.println(strOut);
-        }
-        else return 3;
-      }
-      else return 2;
+      sr5010PokeState(5, avPresets[indexBase].videoSrc);
     }
-  }
-  else return 1;
   
   return 0;
 }
