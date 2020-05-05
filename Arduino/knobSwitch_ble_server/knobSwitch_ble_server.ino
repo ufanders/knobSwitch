@@ -9,6 +9,12 @@
 #include "esp32-hal-log.h"
 #include <BLE2902.h>
 #include <M5Stack.h>
+#include <Wire.h> //I2C library
+
+// SX1509 I2C I/O expander
+#include <SparkFunSX1509.h>
+const byte SX1509_ADDRESS = 0x3E;
+SX1509 io;
 
 #define DEBUG_EXEC
 #define DEBUG_MSG
@@ -150,8 +156,9 @@ BLEServer *pServer;
 BLEService *pService;
 
 void setup() {
-  //Serial.setDebugOutput(true);
-  //esp_log_level_set("*",ESP_LOG_VERBOSE);
+  //NOTE: must be anabled via "core debug level" Arduino menu.
+  Serial.setDebugOutput(true);
+  esp_log_level_set("*",ESP_LOG_VERBOSE);
 
   // initialize the M5Stack object
   //NOTE: Something in the M5Stack API makes BLE init unreliable?
@@ -276,7 +283,13 @@ void setup() {
     }
   }
 
-  keyOld = 0;
+  if(io.begin(SX1509_ADDRESS))
+  {
+    //io.keypad(KEY_ROWS, KEY_COLS, sleepTime, scanTime, debounceTime);
+    io.keypad(4, 4, 256, 32, 16);
+    pinMode(36, INPUT_PULLUP); //SX1509 INT*
+  }
+  else Serial.println("SX1509 not found");
 
   time_now = millis();
   time_now10 = millis();
@@ -291,86 +304,70 @@ bool keySuppress = false;
 char i;
   
 void loop() {
-//=====================================
-  
-  //Serial.println("Loop");
 
   if(millis() >= time_now + 100) //every 100ms
   {
-    //Serial.println("KeyScan");
-    
-    keyNew = analogKeypadUpdate(keypadPin);
-    if(keyOld != keyNew)
+    if(!digitalRead(35))
     {
-      Serial.printf("Key: %u\n", keyNew);
-      keyPressed = true;
-      keyOld = keyNew;
+      unsigned int keyData = io.readKeypad();
+    
+      if (keyData != 0) // If a key was pressed:
+      {
+        byte row = io.getRow(keyData);
+        byte col = io.getCol(keyData);
+        Serial.printf("Key (%d, %d)\n", row, col);
+
+        keyData = (row*4) + col;
+        
+        switch(keyData)
+        {
+          case 0:
+            sprintf(strTemp, "MNCLT");
+          break;
+    
+          case 1:
+            sprintf(strTemp, "MNCUP");
+          break;
+    
+          case 2:
+            sprintf(strTemp, "MNCRT");
+          break;
+    
+          case 3:
+            sprintf(strTemp, "MNCDN");
+          break;
+    
+          case 4:
+            sprintf(strTemp, "MNENT");
+          break;
+    
+          case 5:
+            sprintf(strTemp, "MNRTN");
+          break;
+    
+          case 6:
+            sprintf(strTemp, "MNMEN ON");
+          break;
+    
+          case 7:
+            sprintf(strTemp, "MNMEN OFF");
+          break;
+    
+          default:
+            strTemp[0] = 0;
+          break;
+        }
+
+        if(strTemp[0])
+        {
+          Serial.printf("-> %s\n", strTemp);
+          Serial2.printf("%s\r", strTemp);
+        }
+      }
     }
 
     time_now = millis();
   }
-
-  if(keyPressed)
-  {
-    switch(keyNew)
-    {
-      case 0:
-        sprintf(strTemp, "MNCLT");
-      break;
-
-      case 1:
-        sprintf(strTemp, "MNCUP");
-      break;
-
-      case 2:
-        sprintf(strTemp, "MNCRT");
-      break;
-
-      case 3:
-        sprintf(strTemp, "MNCDN");
-      break;
-
-      case 4:
-        sprintf(strTemp, "MNENT");
-      break;
-
-      case 5:
-        sprintf(strTemp, "MNRTN");
-      break;
-
-      case 6:
-        sprintf(strTemp, "MNMEN ON");
-      break;
-
-      case 7:
-        sprintf(strTemp, "MNMEN OFF");
-      break;
-
-      default:
-        keySuppress = true;
-      break;
-    }
-
-    if(!keySuppress)
-    {
-      if(keyNew <= 5)
-      {
-        Serial.printf("-> %.5s\n", strTemp);
-        Serial2.printf("%.5s\r", strTemp);
-      }
-      
-      if(keyNew >= 6)
-      {
-        Serial.printf("-> %.9s\n", strTemp);
-        Serial2.printf("%.9s\r", strTemp);
-      }
-
-      keySuppress = false;
-    }
-    
-    keyPressed = false;
-  }
-//=====================================
 
   // disconnecting
   if(!deviceConnected && oldDeviceConnected) {
@@ -404,7 +401,14 @@ void loop() {
     Serial.printf("-> %s\n", rxBuf1);
     Serial2.printf("%s\r", rxBuf1);
   }
-
+  
+  if(updateBitfield)
+  {
+    UIUpdate(updateBitfield);
+    updateBitfield = 0;
+    UIStateCurrent++;
+  }
+  
   if(UIStateCurrent != UIStatePrevious)
   {
     #ifdef DEBUG_UI
@@ -435,12 +439,6 @@ void loop() {
     UIStatePrevious = UIStateCurrent;
   }
   
-  if(updateBitfield)
-  {
-    UIUpdate(updateBitfield);
-    updateBitfield = 0;
-  }
-
   if(updateLcd)
   {
     M5.update();
@@ -675,49 +673,6 @@ char sr5010_searchByUUID(const char* ptrUUID)
     else i++;
   }
 
-  return retVal;
-}
-
-int keypadLut[] = {
-  1023, 1010, 850, 765,
-  642, 605, 567, 538,
-  474, 442, 429, 398,
-  362, 287, 231, 199, 0
-};
-
-char analogKeypadUpdate(int analogPin)
-{
-  int analogValue = 0;
-  char i;
-  char key = 0;
-  char retVal;
-  int diff[16];
-  
-  for(i=0; i<8; i++)
-  {
-    analogValue += analogRead(keypadPin) >> 2; //reduce to 10-bit value
-  }
-  analogValue /= 8; //get oversampled average.
-
-  //Serial.printf("anaVal:%d\n", analogValue);
-  
-  for(i=0; i<(sizeof(keypadLut)/sizeof(keypadLut[0])); i++)
-  {
-    if(analogValue <= keypadLut[i])
-    {
-      diff[i] = keypadLut[i] - analogValue;
-    }
-    else diff[i] = analogValue - keypadLut[i];
-  }
-
-  char minimumIndex = 0;
-  for(i=0; i<(sizeof(keypadLut)/sizeof(keypadLut[0])); i++)
-  {
-    if(diff[i] < diff[minimumIndex]) minimumIndex = i;
-  }
-  //Serial.printf("minIdx=%u\n", minimumIndex);
-  retVal = minimumIndex;
-  
   return retVal;
 }
 
