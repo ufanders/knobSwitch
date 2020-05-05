@@ -36,6 +36,8 @@ bool sleepTimerExpired, updateLcd;
 
 #include "knobSwitch.h"
 
+int sr5010MapLocalCharGetText(char, bool, char*);
+
 // See the following for generating UUIDs:
 // https://www.uuidgenerator.net/
 
@@ -498,7 +500,7 @@ int processUpdateSerial(char* strUpdate)
         if(j != 0xFF)
         {
           //if a match is found, insert the arg string index as characteristic value.
-          sprintf(statusStr, "%d\n", j);
+          sprintf(statusStr, "%d\0", j);
           sr5010_chars_ptr[i]->setValue(statusStr);
           match = 1;
         }
@@ -506,36 +508,52 @@ int processUpdateSerial(char* strUpdate)
 
       if(match)
       {
+        switch(i)
+        {
+          case 0:
+            updateBitfield |= bitPwr;
+          break;
+            
+          case 2:
+            updateBitfield |= bitVolume;
+          break;
+            
+          case 3:
+            updateBitfield |= bitMute;
+          break;
+          
+          case 4:
+            updateBitfield |= bitSrcAudio;
+          break;
+          
+          case 5:
+            updateBitfield |= bitSrcVideo;
+          break;
+  
+          default:
+          break;
+        }
+
+        //trigger UI update.
+        UIStateCurrent++; //Just something to keep registering a difference.
+        #ifdef DEBUG_UI
+        Serial.printf("updateBitfield = 0x%X\n", updateBitfield);
+        #endif
+        
         #ifdef DEBUG_MSG
         Serial.printf("^ %s\n", sr5010_chars_ptr[i]->getValue().c_str());
         #endif
         sr5010_chars_ptr[i]->notify();
         //https://github.com/nkolban/ESP32_BLE_Arduino/blob/master/examples/BLE_notify/BLE_notify.ino
         delay(5);
+        
         match = 0;
       }
       #ifdef DEBUG_MSG
       else Serial.println("\nNo Arg match.");
       #endif 
 
-      switch(i)
-      {
-        case 0:
-        case 2:
-        case 3:
-        case 4:
-        case 5:
-          //trigger UI update.
-          UIStateCurrent++; //Just something to keep registering a difference.
-          updateBitfield |= (1 << i);
-          #ifdef DEBUG_UI
-          Serial.printf("updateBitfield = 0x%X\n", updateBitfield);
-          #endif
-        break;
-
-        default:
-        break;
-      }
+      
     }
     #ifdef DEBUG_MSG
     else Serial.println("\nNo Cmd match.");
@@ -678,8 +696,7 @@ char sr5010_searchByUUID(const char* ptrUUID)
 
 void UIUpdate(char bitField)
 {
-  char field, j, argIndex;
-  bool refreshNeeded = false;
+  char field, j, i, strOut[16];
   #define NUM_FIELDS 5
   char cmdIndices[NUM_FIELDS] = {0, 2, 3, 4, 5};
   
@@ -687,51 +704,40 @@ void UIUpdate(char bitField)
   {
     if(bitField & (1 << field))
     {
-      refreshNeeded = true;
-
-      argIndex = 0;
-      if(cmdIndices[field] != 2) //Skip volume field, volume is stored as an integer.
-      {
-        //find argument string major index
-        for(j = 0; j < cmdIndices[field]; j++)
-        {
-          argIndex += sr5010Map[j].numArgs;
-        }
-        argIndex += atoi(sr5010_chars_ptr[cmdIndices[field]]->getValue().c_str());
-        
-        #ifdef DEBUG_UI
-        Serial.printf("argIndex=%d\n", argIndex);
-        #endif
-      }
-
       M5.Lcd.fillRect(0, (10*field), M5.Lcd.width()-1, 10, BLACK);
       M5.Lcd.setCursor(0, (10*field));
-      
+
       switch(field)
       {
         case 0: //Power
-          M5.Lcd.printf("Power: %s", sr5010MapArgsOut[argIndex]);
+          sr5010MapLocalCharGetText(cmdIndices[field], false, strOut);
+          M5.Lcd.printf("Power: %s", strOut);
         break;
 
-        case 1: //Volume (stored as integer, not index)
-          M5.Lcd.printf("Volume: %s",sr5010_chars_ptr[cmdIndices[field]]->getValue().c_str());
+        case 1: //Volume (stored as integer, not arg string index)
+          sr5010MapLocalCharGetText(cmdIndices[field], true, strOut);
+          M5.Lcd.printf("Volume: %s", strOut);
         break;
 
         case 2: //Mute
-          M5.Lcd.printf("Mute: %s", sr5010MapArgsOut[argIndex]);
+          sr5010MapLocalCharGetText(cmdIndices[field], false, strOut);
+          M5.Lcd.printf("Mute: %s", strOut);
         break;
 
         case 3: //Audio source
-          M5.Lcd.printf("Audio: %s", sr5010MapArgsOut[argIndex]);
+          sr5010MapLocalCharGetText(cmdIndices[field], false, strOut);
+          M5.Lcd.printf("Audio: %s", strOut);
         break; 
 
         case 4: //Video source
-          M5.Lcd.printf("Video: %s", sr5010MapArgsOut[argIndex]);
+          sr5010MapLocalCharGetText(cmdIndices[field], false, strOut);
+          M5.Lcd.printf("Video: %s", strOut);
         break;
 
         /*
         case 7: //Zone 2
-          M5.Lcd.printf("Zone2: %s", sr5010MapArgsOut[argIndex]);
+          sr5010MapLocalCharGetText(cmdIndices[field], false, strOut);
+          M5.Lcd.printf("Zone2: %s", strOut);
         break;
         */
 
@@ -740,11 +746,31 @@ void UIUpdate(char bitField)
       }
     }
   }
+}
 
-  if(refreshNeeded) 
+int sr5010MapLocalCharGetText(char charIndex, bool isInteger, char* pStrOut)
+{
+  char argIndex = 0;
+  
+  if(pStrOut == nullptr) return 1;
+  
+  if(!isInteger)
   {
-    updateLcd = true;
+    //find argument string major index
+    for(char i = 0; i < charIndex; i++)
+    {
+      argIndex += sr5010Map[i].numArgs; //get characteristic argument list offset
+    }
+    argIndex += atoi(sr5010_chars_ptr[charIndex]->getValue().c_str()); //add characteristic value to index
+  
+    strcpy(pStrOut, sr5010MapArgsOut[argIndex]);
   }
+  else
+  {
+    sprintf(pStrOut, "%s\0", sr5010_chars_ptr[charIndex]->getValue().c_str());  
+  }
+
+  return 0;
 }
 
 int receiveUpdateSerial1(void)
