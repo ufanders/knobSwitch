@@ -97,7 +97,7 @@ class MyCallbacks: public BLECharacteristicCallbacks {
 
       //fetch command string index using UUID
       char i = 0;
-      const char* pStrOut;
+      char pStrOut[16];
       i = sr5010_searchByUUID(strUUID.c_str());
       //Serial.printf("%u\n",i);
       
@@ -107,22 +107,12 @@ class MyCallbacks: public BLECharacteristicCallbacks {
         
         if(sr5010Map[i].attributes & BIT_ISUPDOWN)
         {
-          if(valNum == 0) pStrOut = strUp;
-          else pStrOut = strDn;
+          if(valNum == 0) strcpy(pStrOut, strUp);
+          else strcpy(pStrOut, strDn);
         }
         else
         {
-          char j = 0;
-          char argIndex = 0;
-    
-          //find argument string major index
-          for(j = 0; j < i; j++)
-          {
-            argIndex += sr5010Map[j].numArgs;
-          }
-          argIndex += valNum; //add argument string minor index
-
-          pStrOut = sr5010MapArgsOut[argIndex];
+          sr5010MapLocalCharGetText(i, false, pStrOut);
         }
         
         //write to serial port.
@@ -139,17 +129,17 @@ void printDeviceAddress() {
   const uint8_t* point = esp_bt_dev_get_address();
   Serial.print("MAC is ");
  
-  for (int i = 0; i < 6; i++) {
- 
+  for (int i = 0; i < 6; i++)
+  {
     char str[3];
  
     sprintf(str, "%02X", (int)point[i]);
     Serial.print(str);
  
-    if (i < 5){
+    if (i < 5)
+    {
       Serial.print(":");
     }
- 
   }
   Serial.println("");
 }
