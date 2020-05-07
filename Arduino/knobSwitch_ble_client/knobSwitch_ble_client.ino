@@ -28,6 +28,7 @@ char batteryLevel, retries;
 volatile char updateBitfield;
 bool sleepTimerExpired, updateLcd;
 volatile bool updateAll;
+/*RTC_DATA_ATTR*/ char UIStatePrevious, UIStateCurrent;
 
 struct avPreset
 {
@@ -117,7 +118,7 @@ class MyClientCallback : public BLEClientCallbacks {
 
     M5.Lcd.fillScreen(BLACK);
     M5.Lcd.fillRect(0, M5.Lcd.height()-11, M5.Lcd.width()-1, 10, GREEN);
-    M5.Lcd.setCursor(0, M5.Lcd.height()-11);
+    M5.Lcd.setCursor(0, M5.Lcd.height()-10);
     M5.Lcd.setTextColor(BLACK);
     M5.Lcd.print("Connected");
     M5.Lcd.setTextColor(WHITE);
@@ -127,10 +128,16 @@ class MyClientCallback : public BLEClientCallbacks {
   void onDisconnect(BLEClient* pclient) {
     connected = false;
     Serial.println("Disconnected.");
+
+    for(int i=4; i<8; i++)
+    {
+      io.analogWrite(i,0);
+      io.analogWrite(i+8,0);
+    }
     
     M5.Lcd.fillScreen(BLACK);
     M5.Lcd.fillRect(0, M5.Lcd.height()-11, M5.Lcd.width()-1, 10, RED);
-    M5.Lcd.setCursor(0, M5.Lcd.height()-11);
+    M5.Lcd.setCursor(0, M5.Lcd.height()-10);
     M5.Lcd.setTextColor(BLACK);
     M5.Lcd.print("Disconnected");
     M5.Lcd.setTextColor(WHITE);
@@ -210,6 +217,7 @@ bool connectToServer() {
     }
  
     connected = true;
+    updateBitfield = 0xFF;
     updateLcd = true;
 }
 
@@ -309,6 +317,15 @@ void UIUpdate(char bitField)
         case 0: //Power
           sr5010MapLocalStateGetText(cmdIndices[field], false, strOut);
           M5.Lcd.printf("Power: %s", strOut);
+          if(sr5010MapLocalState[cmdIndices[field]] == 1)
+          {
+            for(i=4; i<8; i++)
+            {
+              //clear LED indicators.
+              io.analogWrite(i, 0);
+              io.analogWrite(i+8, 0);
+            }
+          }
         break;
 
         case 1: //Volume (stored as integer, not arg string index)
@@ -462,9 +479,6 @@ int sr5010PokeState(char stateIndex, int stateValue)
 void setup() {
 
   int i = 0;
-  time_now = millis();
-  sleepTimerExpired = false;
-  updateLcd = true;
 
   //pins are pulled up by hardware and inputs at POR.
   //pinMode(39, INPUT_PULLUP); //Button A
@@ -527,18 +541,24 @@ void setup() {
   {
     //io.keypad(KEY_ROWS, KEY_COLS, sleepTime, scanTime, debounceTime);
     io.keypad(4, 4, 256, 32, 16);
-    io.pinMode(4, ANALOG_OUTPUT);
-    io.pinMode(5, ANALOG_OUTPUT);
-    io.pinMode(6, ANALOG_OUTPUT);
-    io.pinMode(7, ANALOG_OUTPUT);
-    io.pinMode(12, ANALOG_OUTPUT);
-    io.pinMode(13, ANALOG_OUTPUT);
-    io.pinMode(14, ANALOG_OUTPUT);
-    io.pinMode(15, ANALOG_OUTPUT);
+
+    for(i=4; i<8; i++)
+    {
+      io.analogWrite(i,0);
+      io.analogWrite(i+8,0);
+      io.pinMode(i, ANALOG_OUTPUT);
+      io.pinMode(i+8, ANALOG_OUTPUT);
+    }
     pinMode(36, INPUT_PULLUP); //SX1509 INT*
   }
   else Serial.println("SX1509 not found");
 
+  UIStatePrevious = 0;
+  UIStateCurrent = 0;
+
+  time_now = millis();
+  sleepTimerExpired = false;
+  updateLcd = true;
 
   /*
   // Retrieve a Scanner and set the callback we want to use to be informed when we
@@ -563,21 +583,18 @@ void setup() {
   //esp_deep_sleep_start();
 } // End of setup.
 
-RTC_DATA_ATTR char UIStatePrevious;
-
 // This is the Arduino main loop function.
 void loop() {
   
   char i;
   if(connected)
   {
-    
     if(millis() >= time_now2 + 100) //every 100ms
     {
       //get all button input states at once.
       
-      i = rotary.rotate() | rotary.push() << 2 | (~digitalRead(39) << 3) | \
-      (~digitalRead(38) << 4) | (~digitalRead(37) << 5) ;
+      UIStateCurrent = rotary.rotate() | (rotary.push() << 2) | (~digitalRead(39) << 3) \
+      | (~digitalRead(38) << 4) | (~digitalRead(37) << 5) | (~digitalRead(35) << 6);
     
       if(!digitalRead(35))
       {
@@ -590,16 +607,18 @@ void loop() {
           Serial.printf("Key (%d, %d)\n", row, col);
           keyData = sendPreset(row, col);
           if(keyData) Serial.printf("sendPreset() = %d\n", keyData);
-
-          i |= (1 << 6);
         }
       }
   
       time_now2 = millis();
+      Serial.printf("UIStPrv=%d UIStCur=%d\n", UIStatePrevious, UIStateCurrent);
+      Serial.printf("slpTmrExprd=%d time_now=%lu millis=%lu\n", sleepTimerExpired, time_now, millis());
     }
   
-    if( i != UIStatePrevious)
+    if(UIStatePrevious != UIStateCurrent)
     {
+      delay(250);
+      
       if(sleepTimerExpired)
       {
         //wake up LCD, reconnect to BLE server and process UI input.
@@ -609,21 +628,23 @@ void loop() {
         M5.Lcd.setCursor(0, M5.Lcd.height()-21);
         M5.Lcd.printf("Battery at %u%%.\n", batteryLevel);
         updateLcd = true;
+
+        /*
+        for(i=4; i<8; i++)
+        {
+          //TODO: restore indicators.
+          io.analogWrite(i,0);
+          io.analogWrite(i+8,0);
+        }
+        */
         
         sleepTimerExpired = false;
       }
       
       time_now = millis();
+      UIStatePrevious = UIStateCurrent;
     }
-    UIStatePrevious = i;
-
-    //poke remote characteristics per the control being operated.
-    char c;
-    char txBuf[16];
-    std::string val;
-
-    BLERemoteCharacteristic* pRemoteCharacteristic;
-
+    
     if(!digitalRead(39)) //button A
     {
       sr5010MapLocalState[1] ^= 1; //toggle power state.
@@ -632,6 +653,7 @@ void loop() {
       sr5010PokeState(1, sr5010MapLocalState[1]);
 
       while(!digitalRead(39)); 
+      time_now = millis();
     }
 
     i = rotary.rotate(); // 0 = not turning, 1 = CW, 2 = CCW
@@ -639,6 +661,7 @@ void loop() {
     {
       //Poke MV up/down.
       sr5010PokeState(9, (i-1));
+      time_now = millis();
     }
 
     if(rotary.push()) //rotary encoder button.
@@ -647,28 +670,28 @@ void loop() {
       
       //Poke MU.
       sr5010PokeState(3, sr5010MapLocalState[3]);
+      time_now = millis();
     }
 
     if(!digitalRead(38)) //button B
     {
-      time_now = millis();
-      sleepTimerExpired = false;
+      //time_now = millis();
+      ///sleepTimerExpired = false;
       
       sr5010MapLocalState[4]++; //increment input state.
       if(sr5010MapLocalState[4] >= sr5010Map[4].numArgs) sr5010MapLocalState[4] = 0;
       
-      c = '0' + sr5010MapLocalState[4];
-      
       //Poke SI
       sr5010PokeState(4, sr5010MapLocalState[4]);
 
-      while(!digitalRead(38)); 
+      while(!digitalRead(38));
+      time_now = millis();
     }
 
     if(!digitalRead(37)) //button C
     {
-      time_now = millis();
-      sleepTimerExpired = false;
+      //time_now = millis();
+      //sleepTimerExpired = false;
       
       sr5010MapLocalState[5]++; //increment video input state.
       if(sr5010MapLocalState[5] >= sr5010Map[5].numArgs) sr5010MapLocalState[5] = 0;
@@ -677,6 +700,7 @@ void loop() {
       sr5010PokeState(5, sr5010MapLocalState[5]);
 
       while(!digitalRead(37)); 
+      time_now = millis();
     }
 
     if(0) //selector switch
@@ -716,6 +740,14 @@ void loop() {
   {
     sleepTimerExpired = true;
     Serial.println("Sleeping now.");
+    
+    for(i=4; i<8; i++)
+    {
+      //turn off indicators.
+      io.analogWrite(i,0);
+      io.analogWrite(i+8,0);
+    }
+    
     M5.Lcd.setBrightness(0);
     //M5.Lcd.sleep();
   }
@@ -729,7 +761,9 @@ void loop() {
 
   if(updateLcd)
   {
-    M5.update();
+    //M5.update();
+    //time_now = millis();
+    //sleepTimerExpired = false;
     updateLcd = false;
   }
 
