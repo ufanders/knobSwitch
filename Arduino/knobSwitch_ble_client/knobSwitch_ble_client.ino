@@ -146,16 +146,21 @@ class MyClientCallback : public BLEClientCallbacks {
 };
 
 const char serverAddress[] = "24:0A:C4:A4:52:22"; //"b4:e6:2d:d9:fb:47";
+BLEClient*  pClient;
 
 bool connectToServer() {
 
-    BLEClient*  pClient  = BLEDevice::createClient();
-    pClient->setClientCallbacks(new MyClientCallback());
+    pClient = BLEDevice::createClient();
 
+    if(!pClient) return false;
+
+    //https://github.com/nkolban/esp32-snippets/issues/874
     // Connect to the remote BLE Server.
     Serial.printf("Connecting to %s.\n", serverAddress);
-    //Serial.println(myDevice->getAddress().toString().c_str());
-    pClient->connect(BLEAddress(serverAddress)); //myDevice);  // if you pass BLEAdvertisedDevice instead of address, it will be recognized type of peer device address (public or private)
+    if(!pClient->connect(BLEAddress(serverAddress))) //, BLE_ADDR_TYPE_PUBLIC)); // if you pass BLEAdvertisedDevice instead of address, it will be recognized type of peer device address (public or private)
+    {
+      return false;
+    }
 
     // Obtain a reference to the service we are after in the remote BLE server.
     pRemoteService = pClient->getService(serviceUUID);
@@ -166,7 +171,9 @@ bool connectToServer() {
       return false;
     }
     Serial.println("Service found.");
-
+    
+    pClient->setClientCallbacks(new MyClientCallback());
+    
     int i = 0;
 
     //register all characteristics for realtime notification.
@@ -215,10 +222,11 @@ bool connectToServer() {
       else Serial.println("not found.");
       
     }
- 
-    connected = true;
+    
     updateBitfield = 0xFF;
     updateLcd = true;
+    connected = true;
+    return true;
 }
 
 /**
@@ -478,6 +486,10 @@ int sr5010PokeState(char stateIndex, int stateValue)
 
 void setup() {
 
+  //NOTE: must be anabled via "core debug level" Arduino menu.
+  Serial.setDebugOutput(true);
+  esp_log_level_set("*",ESP_LOG_VERBOSE);
+
   int i = 0;
 
   //pins are pulled up by hardware and inputs at POR.
@@ -611,8 +623,8 @@ void loop() {
       }
   
       time_now2 = millis();
-      Serial.printf("UIStPrv=%d UIStCur=%d\n", UIStatePrevious, UIStateCurrent);
-      Serial.printf("slpTmrExprd=%d time_now=%lu millis=%lu\n", sleepTimerExpired, time_now, millis());
+      //Serial.printf("UIStPrv=%d UIStCur=%d\n", UIStatePrevious, UIStateCurrent);
+      //Serial.printf("slpTmrExprd=%d time_now=%lu millis=%lu\n", sleepTimerExpired, time_now, millis());
     }
   
     if(UIStatePrevious != UIStateCurrent)
@@ -725,7 +737,7 @@ void loop() {
       retries++;
     }
 
-    if(doConnect && (retries > 2))
+    if(doConnect && (retries > 9))
     {
       Serial.println("BLE not connected.");
       doConnect = false;
